@@ -16,7 +16,7 @@ namespace OutWit.Render.BlenderBridge.LocalTests.Live
 
         private const string DEFAULT_SERVER_URL = "https://engine.omnibuscloud.com";
 
-        private const string DEFAULT_IDENTITY_URL = "https://id.waveslogic.com";
+        private const string DEFAULT_IDENTITY_URL = "https://auth.omnibuscloud.com";
 
         #endregion
 
