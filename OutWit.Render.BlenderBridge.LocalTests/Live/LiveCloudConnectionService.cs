@@ -1,17 +1,16 @@
 using OutWit.Cloud.SDK;
 using OutWit.Render.BlenderBridge.Services.Cloud.Interfaces;
 
-namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Cloud
+namespace OutWit.Render.BlenderBridge.LocalTests.Live
 {
     /// <summary>
-    /// Tier-A (live) bridge cloud connection: authenticates with a service-to-service API key and
-    /// connects to a deployed WitCloud / OmnibusCloud server through the public OutWit.Cloud.SDK,
-    /// exactly as a headless third-party initiator would. All token acquisition + WitRPC wiring is
-    /// owned by <see cref="WitCloudClient"/>; this adapter only manages the connection lifetime so
-    /// it can be injected into <c>BridgeLocalHost</c> in place of the interactive-OIDC production
-    /// connection service.
+    /// Tier-A (live) cloud connection: authenticates with a service-to-service API key and connects
+    /// to a deployed WitCloud / OmnibusCloud server through the public OutWit.Cloud.SDK, exactly as a
+    /// headless third-party initiator would. All token acquisition + WitRPC wiring is owned by
+    /// <see cref="WitCloudClient"/>; this adapter only manages the connection lifetime so it can be
+    /// injected into <c>BridgeLocalHost</c> in place of the interactive-OIDC production connection.
     /// </summary>
-    internal sealed class BridgeLiveCloudConnectionService : IBridgeCloudConnectionService
+    internal sealed class LiveCloudConnectionService : IBridgeCloudConnectionService
     {
         #region Fields
 
@@ -24,7 +23,7 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Cloud
 
         #region Constructors
 
-        public BridgeLiveCloudConnectionService(string serverUrl, string identityUrl, string apiKey)
+        public LiveCloudConnectionService(string serverUrl, string identityUrl, string apiKey)
         {
             m_serverUrl = serverUrl;
             m_identityUrl = identityUrl;
@@ -45,8 +44,9 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Cloud
             {
                 await client.ConnectAsync(cancellationToken);
             }
-            catch
+            catch (Exception ex)
             {
+                NUnit.Framework.TestContext.Progress.WriteLine($"[live connect failed] {ex.GetType().Name}: {ex.Message}");
                 await client.DisposeAsync();
                 return false;
             }

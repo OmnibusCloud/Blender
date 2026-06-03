@@ -78,14 +78,15 @@ namespace OutWit.Render.BlenderBridge.LocalTests
 
         #region Tools
 
-        protected BridgeLocalHost CreateBridgeHost(string localRestUrl, string sessionDir)
+        protected BridgeLocalHost CreateBridgeHost(string localRestUrl, string sessionDir, string downloadDir)
         {
             return new BridgeLocalHost(
                 identityUrl: "http://127.0.0.1:5701",
                 localRestUrl: localRestUrl,
                 sessionDir: sessionDir,
                 cloudConnectionService: CloudConnectionService,
-                serverUrl: "http://local-engine");
+                serverUrl: "http://local-engine",
+                downloadCachePath: downloadDir);
         }
 
         private static bool HasHostBlender(string moduleRoot)

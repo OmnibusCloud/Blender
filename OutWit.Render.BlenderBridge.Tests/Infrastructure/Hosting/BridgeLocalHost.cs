@@ -34,7 +34,8 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
             string sessionDir,
             BridgeStartupSecretMode startupSecretMode = BridgeStartupSecretMode.Disabled,
             IBridgeCloudConnectionService? cloudConnectionService = null,
-            string serverUrl = "https://cloud.example.com")
+            string serverUrl = "https://cloud.example.com",
+            string? downloadCachePath = null)
         {
             var builder = Host.CreateApplicationBuilder();
             builder.Logging.AddSimpleConsole();
@@ -44,7 +45,7 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
                 IdentityUrl = identityUrl,
                 LocalRestUrl = localRestUrl,
                 SessionStoragePath = sessionDir,
-                DownloadCachePath = sessionDir,
+                DownloadCachePath = downloadCachePath ?? sessionDir,
                 StartupSecretMode = startupSecretMode,
                 LeaseHeartbeatIntervalSeconds = 5,
                 LeaseTimeoutSeconds = 30,
