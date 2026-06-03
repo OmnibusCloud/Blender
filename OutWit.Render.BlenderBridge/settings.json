@@ -1,0 +1,14 @@
+{
+  "Bridge": {
+    "ServerUrl": "https://engine.omnibuscloud.com",
+    "IdentityUrl": "https://id.waveslogic.com",
+    "LocalRestUrl": "http://127.0.0.1:17777/bridge/",
+    "SessionStoragePath": "BridgeSession",
+    "DownloadCachePath": "BridgeCache",
+    "StartupSecretMode": "Disabled",
+    "LeaseHeartbeatIntervalSeconds": 5,
+    "LeaseTimeoutSeconds": 30,
+    "OrphanGracePeriodSeconds": 600,
+    "WatchdogIntervalSeconds": 5
+  }
+}

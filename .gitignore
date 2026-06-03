@@ -12,6 +12,10 @@
 *.nupkg
 *.snupkg
 
+# Local secrets (test API keys, .env) — never commit
+.env
+*.env
+
 # Mono Auto Generated Files
 mono_crash.*
 
@@ -97,3 +101,8 @@ Migrations/
 # JetBrains Rider
 .idea/
 .idea_modules/
+
+# Python (Blender addon) compiled cache
+__pycache__/
+*.py[cod]
+*.egg-info/
