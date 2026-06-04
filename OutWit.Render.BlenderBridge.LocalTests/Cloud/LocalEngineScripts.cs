@@ -75,6 +75,43 @@ namespace OutWit.Render.BlenderBridge.LocalTests.Cloud
 
         #endregion
 
+        #region Submit / Prepare — SDK 1.1 IWitCloudScripts contract
+
+        // SDK 1.1 added the universal SubmitAsync surface (and the Prepare builder) alongside RunAsync.
+        // The bridge's local tier drives the engine through the RunAsync overloads above; the untyped
+        // SubmitAsync funnels to the same RunCoreAsync when it carries no schedule/group/project/options
+        // (the only shape the in-process Tier-B engine supports). The submission-object and builder
+        // entry points are not used by the bridge here, so they throw like the other Tier-B gaps.
+
+        public Task<WitJobHandle> SubmitAsync(WitJobSubmission submission, CancellationToken ct = default) => NotSupported();
+
+        public Task<WitJobHandle> SubmitAsync(
+            string scriptName,
+            IReadOnlyList<object?> parameters,
+            Guid? clientGroupId = null,
+            Guid? projectId = null,
+            DateTime? scheduledForUtc = null,
+            WitProcessingOptions? options = null,
+            CancellationToken ct = default)
+        {
+            if (clientGroupId.HasValue || projectId.HasValue || scheduledForUtc.HasValue || options != null)
+                return NotSupported();
+
+            return RunCoreAsync(scriptName, parameters?.ToArray() ?? [], ct);
+        }
+
+        public WitJobRequest Prepare(string scriptName) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1>(string scriptName, T1? value1) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1, T2>(string scriptName, T1? value1, T2? value2) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1, T2, T3>(string scriptName, T1? value1, T2? value2, T3? value3) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1, T2, T3, T4>(string scriptName, T1? value1, T2? value2, T3? value3, T4? value4) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1, T2, T3, T4, T5>(string scriptName, T1? value1, T2? value2, T3? value3, T4? value4, T5? value5) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1, T2, T3, T4, T5, T6>(string scriptName, T1? value1, T2? value2, T3? value3, T4? value4, T5? value5, T6? value6) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1, T2, T3, T4, T5, T6, T7>(string scriptName, T1? value1, T2? value2, T3? value3, T4? value4, T5? value5, T6? value6, T7? value7) => NotSupportedRequest();
+        public WitJobRequest Prepare<T1, T2, T3, T4, T5, T6, T7, T8>(string scriptName, T1? value1, T2? value2, T3? value3, T4? value4, T5? value5, T6? value6, T7? value7, T8? value8) => NotSupportedRequest();
+
+        #endregion
+
         #region Not supported in the in-process local tier
 
         public Task<WitJobHandle> ScheduleAsync(string scriptName, DateTime scheduledForUtc, CancellationToken ct = default) => NotSupported();
@@ -172,6 +209,9 @@ namespace OutWit.Render.BlenderBridge.LocalTests.Cloud
 
         private static Task<WitJobResult<TResult>> NotSupportedResult<TResult>([CallerMemberName] string? member = null)
             => throw new NotSupportedException($"{member} is not supported by the in-process local engine client (Tier B). The bridge waits via WitJobHandle.WaitAsync.");
+
+        private static WitJobRequest NotSupportedRequest([CallerMemberName] string? member = null)
+            => throw new NotSupportedException($"{member} is not supported by the in-process local engine client (Tier B). The bridge submits jobs via plain RunAsync(scriptName, ...).");
 
         #endregion
     }

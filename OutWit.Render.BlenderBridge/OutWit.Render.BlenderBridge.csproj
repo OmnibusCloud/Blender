@@ -28,7 +28,7 @@
     <!-- The public, recommended way to attach to WitCloud / OmnibusCloud.
          OutWit.Cloud.SDK brings OutWit.Cloud.Contracts (IApiChannel/IBlobChannel
          + DTOs) transitively. -->
-    <PackageReference Include="OutWit.Cloud.SDK" Version="1.0.0" />
+    <PackageReference Include="OutWit.Cloud.SDK" Version="1.1.*" />
     <PackageReference Include="OutWit.Controller.Render.Model" Version="1.0.0" />
   </ItemGroup>
 

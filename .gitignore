@@ -72,7 +72,11 @@ dist/
 # folders populated can run the full Render.Tests suite. See
 # Render/OutWit.Controller.Render.Tests/README.md for layout.
 @Prerequisites/
-@Data/
+# Ignore @Data contents (large demo scenes) but re-include the small, committed canonical
+# example scenes below. (Must be @Data/* not @Data/ so children can be re-included.)
+@Data/*
+!@Data/canonical/
+@Data/canonical/*.blend1
 
 # Per-project test output (NUnit/MSTest trx files, coverage reports)
 TestResults/
