@@ -132,6 +132,42 @@ namespace OutWit.Render.BlenderBridge.LocalTests.Live
             });
         }
 
+        [Test]
+        public async Task BigCyclesVideo200LiveTest()
+        {
+            // Deliberately large render-bound video to study balance at real scale: 1080p / 256 spp /
+            // 200 frames of the procedural canonical wave (heavy: Wave modifier + subsurf + metallic
+            // Cycles). Cycles chunk = clamp(ceil(200/48),1,8) = 5 → persistent-batch active (5 frames /
+            // process, scene loaded once per chunk). At this scale render time per frame dominates the
+            // fixed per-frame overhead, so node Rate should predict real wall and the split should be
+            // well balanced (makespan even across nodes). Watch NODE ASSIGNMENTS in the admin UI.
+            const RenderEngine engine = RenderEngine.Cycles;
+            const int resX = 1920, resY = 1080, samples = 256, startFrame = 1, endFrame = 200;
+
+            var scenePath = TestPaths.ResolveScene("canonical_wave.blend", "canonical/canonical_wave.blend");
+            await RunBridgeAsync("big-cycles-video-200", 17880, async (http, url, outputDir) =>
+            {
+                var upload = await UploadAsync(http, url, scenePath);
+                var launch = await SendPostAsync<RunRenderVideoResponse>(
+                    http, url, nameof(IBlenderBridgeChannel.RunRenderVideoAsync),
+                    upload.BlobId, startFrame, endFrame, VideoRenderOptions(engine, resX, resY, samples), Video());
+
+                Banner($"BIG CYCLES VIDEO submitted: JobId={launch.JobId}  (1080p/256spp, {endFrame - startFrame + 1} frames) — open NODE ASSIGNMENTS in the UI now");
+
+                var job = await WaitForJobCompletionAsync(http, url, launch.JobId);
+                var download = await SendGetAsync<DownloadResultResponse>(http, url, nameof(IBlenderBridgeChannel.DownloadResultAsync), launch.JobId.ToString());
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(job.ScriptName, Is.EqualTo("RenderVideoCycles"));
+                    Assert.That(job.Status, Is.EqualTo("Completed"));
+                    Assert.That(download.FileName, Does.EndWith(".mp4"));
+                    Assert.That(download.FileSize, Is.GreaterThan(0));
+                });
+                TestContext.Progress.WriteLine($"BIG CYCLES VIDEO done: {download.FileName} ({download.FileSize} bytes) in {outputDir}");
+            });
+        }
+
         #endregion
 
         #region Tools

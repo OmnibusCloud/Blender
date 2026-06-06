@@ -145,3 +145,47 @@ environment issue (local in-process render not staged here), NOT the submit.
 - If it FAILS → the bug is the SDK untyped SubmitAsync serialization or the server group-submit; get the
   real server-side rejection from engine.omnibuscloud.com logs.
 - Then finish: addon group-selection UI (EnumProperty) → render operators; commit the live group test.
+
+## RESOLVED (2026-06-06): group submit was an AUTHORIZATION failure, not a serialization/server bug
+
+Isolated WitCloud-level-first, exactly as planned. **The group-submit path (SDK + server) is correct and
+working** — the live failure was the api-key user lacking an execution scope for the group.
+
+**Evidence (3 layers):**
+1. **In-process WitCloud unit tests** (`OutWit.Cloud.Tests/Channels/ApiChannelTests`, the `*InGroup*`
+   cases): 5/5 green. Server-side group submit + untyped/typed param round-trip both work. Rebuts
+   hypotheses (a) serialization and (c) server bug.
+2. **Live SDK-direct isolation test** (new `FramesGroupSubmitViaSdkDirectLiveTest`) — replicates the
+   bridge's exact group branch `client.Scripts.SubmitAsync("RenderFramesCycles", new object?[]{ scene,
+   start, end, options }, groupId)` straight against engine.omnibuscloud.com, bypassing the bridge REST.
+   Connect + 13 MB blob upload succeed; submit throws at `WitCloudScriptsClient.SubmitAsync` with the
+   REAL server reason: **`Script submission failed: User '78c30d4f-d00e-4396-bb77-8642156175fd' is not
+   authorized to launch on group 'b952dfd2-3483-4fe0-a266-c584cd13f591'.`** → hypothesis (b).
+3. **Live scope diagnostic** (new `ApiKeyUserExecutionScopeDiagnosticsLiveTest`,
+   `client.GetExecutionScopeOptionsAsync()`): the api-key user has
+   **`CanRunOnAllClients=False, Groups=0, Projects=0`** — no execution scope at all, so it can target
+   zero groups. (No-group renders still work because the default `SubmitJobAsync` path does NOT run
+   `ValidateSelectedClientGroupAsync` — scope is only enforced for group/project targeting.)
+
+**Why the prior session saw only opaque "Failed to process request":** the bridge REST processor
+(`BridgeRestRequestProcessor`) surfaced `DescribeError` only in the outer `Process` catch (e1301a4), but
+`RunRenderFramesAsync` returns `Task<T>` so it runs through `ProcessGenericAsync`, whose catch (and
+`ProcessAsync`'s) used a BARE "Failed to process request" and dropped the exception chain. **Fixed this
+session:** both async/generic catch branches now route through `DescribeError`, so the real SDK/server
+reason (e.g. the "not authorized" message) reaches the addon/test.
+
+**Eligibility model (`UserExecutionScopeService` + `UserExecutionScopeResolution.AllowsGroup`):** a user
+may target a group iff their active `UserExecutionScope` has `CanRunOnAllClients=true` OR an active
+`UserExecutionScopeGroups` link to that group id. In production the initiator is a real OIDC user whose
+scope follows group membership; the headless api-key principal simply has no scope row.
+
+**To make the live group test pass (operational, not code):** in the WitCloud admin UI, grant the api-key
+user `78c30d4f-d00e-4396-bb77-8642156175fd` an execution scope authorizing group
+`b952dfd2-3483-4fe0-a266-c584cd13f591` (or `CanRunOnAllClients`). Then re-run
+`FramesGroupSubmitViaSdkDirectLiveTest` (SDK path) and `FramesTargetedAtClientGroupLiveTest` (full bridge
+REST path) — the latter now also surfaces real errors. Only after the grant can the bridge REST 6-param
+routing / `List<RenderSceneAttachmentRefData>` serialization be exercised end-to-end (still unproven
+because submit was rejected before reaching dispatch).
+
+**Remaining (unchanged):** addon group-selection UI (EnumProperty) → render operators; commit the live
+group tests + the REST-mask fix.

@@ -94,7 +94,7 @@ namespace OutWit.Render.BlenderBridge.Transport.Rest
             }
             catch (Exception e)
             {
-                return WitResponse.InternalServerError("Failed to process request", e);
+                return WitResponse.InternalServerError(DescribeError(e), e);
             }
         }
 
@@ -114,7 +114,7 @@ namespace OutWit.Render.BlenderBridge.Transport.Rest
             }
             catch (Exception e)
             {
-                return WitResponse.InternalServerError("Failed to process request", e);
+                return WitResponse.InternalServerError(DescribeError(e), e);
             }
         }
 

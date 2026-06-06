@@ -45,7 +45,7 @@
     <PackageReference Include="OutWit.Engine.Sdk" Version="1.1.*" />
     <PackageReference Include="OutWit.Controller.Render" Version="1.16.0" />
     <PackageReference Include="OutWit.Controller.Render.Scripts" Version="1.0.1" />
-    <PackageReference Include="OutWit.Controller.Render.Model" Version="1.0.0" />
+    <PackageReference Include="OutWit.Controller.Render.Model" Version="1.1.0" />
     <!-- Render declares runtime [WitPluginDependency] on the Variables + Grid controllers, so their
          modules must be staged next to render.module for the engine's plugin loader to resolve them. -->
     <PackageReference Include="OutWit.Controller.Variables" Version="1.0.*" />
