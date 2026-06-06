@@ -45,6 +45,34 @@ if (-not $versionMatch.Success)
 }
 
 $version = '{0}.{1}.{2}' -f $versionMatch.Groups[1].Value, $versionMatch.Groups[2].Value, $versionMatch.Groups[3].Value
+
+# The addon version lives in two files; Blender reads bl_info (legacy install) and the manifest
+# (extension install). Keep them equal so both report the same version.
+$manifestFile = Join-Path $packageRoot 'blender_manifest.toml'
+if (Test-Path $manifestFile)
+{
+    $manifestContent = Get-Content $manifestFile -Raw
+    $manifestVersionMatch = [regex]::Match($manifestContent, '(?m)^\s*version\s*=\s*"([^"]+)"')
+    if (-not $manifestVersionMatch.Success)
+    {
+        throw "Could not parse version from blender_manifest.toml: $manifestFile"
+    }
+    if ($manifestVersionMatch.Groups[1].Value -ne $version)
+    {
+        throw "Version mismatch: __init__.py bl_info is '$version' but blender_manifest.toml is '$($manifestVersionMatch.Groups[1].Value)'. Bump both to the same value."
+    }
+}
+
+# Map .NET RID -> Blender extension platform tag so each per-platform zip declares its target OS
+# (the repository serves the right zip per OS, and install-from-disk refuses a wrong-arch package).
+$platformTag = switch ($RuntimeIdentifier)
+{
+    'win-x64' { 'windows-x64' }
+    'linux-x64' { 'linux-x64' }
+    'osx-arm64' { 'macos-arm64' }
+    default { throw "No Blender platform tag mapping for runtime '$RuntimeIdentifier'." }
+}
+
 $modeFolder = if ($DeploymentMode -eq 'SelfContained') { 'self-contained' } else { 'framework-dependent' }
 $modeSuffix = if ($DeploymentMode -eq 'SelfContained') { 'selfcontained' } else { 'dotnet' }
 $zipName = "omnibuscloud-render-bridge-blender-addon-$RuntimeIdentifier-$modeSuffix-$version.zip"
@@ -103,6 +131,23 @@ if (Test-Path $stagingVariantRoot)
 New-Item -ItemType Directory -Path $stagingPackageRoot -Force | Out-Null
 Copy-Item -Path (Join-Path $packageRoot '*') -Destination $stagingPackageRoot -Recurse -Force
 Remove-PythonCaches -root $stagingPackageRoot
+
+# Stamp this build's target platform into the staged manifest so the zip is platform-specific.
+$stagedManifest = Join-Path $stagingPackageRoot 'blender_manifest.toml'
+if (Test-Path $stagedManifest)
+{
+    $stagedManifestContent = Get-Content $stagedManifest -Raw
+    $platformsLine = "platforms = [`"$platformTag`"]"
+    if ($stagedManifestContent -match '(?m)^\s*platforms\s*=.*$')
+    {
+        $stagedManifestContent = [regex]::Replace($stagedManifestContent, '(?m)^\s*platforms\s*=.*$', $platformsLine)
+    }
+    else
+    {
+        $stagedManifestContent = $stagedManifestContent.TrimEnd() + "`nplatforms = [`"$platformTag`"]`n"
+    }
+    Set-Content -Path $stagedManifest -Value $stagedManifestContent -NoNewline
+}
 
 $effectiveBridgePublishPath = $BridgePublishPath
 if ([string]::IsNullOrWhiteSpace($effectiveBridgePublishPath))

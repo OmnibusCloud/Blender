@@ -77,13 +77,33 @@ Two deployment modes per platform:
 5. **Host the repo** at a stable URL, e.g. `https://omnibuscloud.com/blender/index.json` (static hosting /
    bucket / GitHub Pages). This URL is what users add to Blender.
 
-**Open infra decisions (TODO):**
-- [ ] Where to host the extension repo (index.json + zips) over HTTPS.
-- [ ] Tag platforms in the manifest per build, or use `blender --command extension build
-      --split-platforms`, so the repo serves the right zip per OS automatically (RID→platform map above).
-- [ ] Sync `bl_info` ↔ `blender_manifest.toml` version (CI check / generator).
-- [ ] CI step to regenerate + upload the repo index after the build.
-- [ ] Decide the platform matrix (add Intel mac / arm Linux/Windows if needed).
+### Decisions (2026-06-06)
+- **Final host = the crowdcomputing portal (omnibuscloud.com).** The extension repository
+  (`index.json` + zips) will live there once the portal ships. Until then, see "Temporary
+  distribution" below.
+- **Platform tagging: DONE.** `Build-BlenderAddonPackage.ps1` now stamps `platforms = ["<tag>"]` into
+  each zip's manifest (win-x64→windows-x64, linux-x64→linux-x64, osx-arm64→macos-arm64). The future repo
+  serves the right zip per OS, and install-from-disk refuses a wrong-arch package.
+- **Version sync: DONE.** The build fails if `__init__.py` `bl_info` version ≠ `blender_manifest.toml`
+  version. Bump both together (single version, two files).
+- **Platform matrix = win-x64, linux-x64, macos-arm64 (Apple Silicon).** No Intel mac (Blender 5+ drops
+  it); add arm Linux/Windows only on demand.
+
+**Still open (needs the portal / infra):**
+- [ ] Host the repo `index.json` + zips over HTTPS (portal, or a temporary host — below).
+- [ ] CI step to regenerate (`blender --command extension server-generate`) + upload the repo index.
+
+### Temporary distribution (now, while the portal is not ready)
+For debugging, use **install-from-disk** — no infra:
+1. Get a zip for your OS: run `OutWit.Render.BlenderAddon/Build-BlenderAddonPackages.ps1` locally, or push
+   an `addon-v*` tag and grab the per-platform zips CI attaches to the GitHub Release.
+2. *Preferences → Get Extensions → ▾ → Install from Disk* (4.2+) → pick the **self-contained** zip → enable.
+3. To iterate: rebuild and install again.
+
+Optional temporary auto-update repo (if you want to test the in-Blender update flow before the portal):
+publish the zips + a generated `index.json` to a static HTTPS location (e.g. GitHub Pages →
+`https://omnibuscloud.github.io/Blender/index.json`) and add that URL as a remote repository. Migrating to
+the portal later is just changing the publish target + the URL users add.
 
 ---
 
