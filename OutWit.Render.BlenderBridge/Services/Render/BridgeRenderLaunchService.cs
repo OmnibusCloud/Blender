@@ -202,6 +202,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             int frame,
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -212,7 +213,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveStillScript(options.Engine);
 
-            var handle = await client.Scripts.RunAsync(scriptName, scene, frame, options);
+            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options }, selectedClientGroupId);
 
             Logger.LogInformation("Bridge RenderStill launched for blob {BlobId} at frame {Frame} with job {JobId}",
                 sceneBlobId,
@@ -237,6 +238,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderOptionsData options,
             TileOptionsData tileOptions,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -248,7 +250,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveStillTiledScript(options.Engine);
 
-            var handle = await client.Scripts.RunAsync(scriptName, scene, frame, tilesX, tilesY, options, tileOptions);
+            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, tileOptions }, selectedClientGroupId);
 
             Logger.LogInformation("Bridge RenderStillTiled launched for blob {BlobId} at frame {Frame} with tiles {TilesX}x{TilesY} and job {JobId}",
                 sceneBlobId,
@@ -273,6 +275,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             int endFrame,
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -283,7 +286,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveFramesScript(options.Engine);
 
-            var handle = await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options);
+            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options }, selectedClientGroupId);
 
             Logger.LogInformation("Bridge RenderFrames launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
                 sceneBlobId,
@@ -308,6 +311,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderOptionsData options,
             VideoOptionsData video,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -319,7 +323,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveVideoScript(options.Engine);
 
-            var handle = await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options, video);
+            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, video }, selectedClientGroupId);
 
             Logger.LogInformation("Bridge RenderVideo launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
                 sceneBlobId,

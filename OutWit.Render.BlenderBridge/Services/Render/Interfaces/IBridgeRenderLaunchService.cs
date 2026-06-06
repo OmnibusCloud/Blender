@@ -38,6 +38,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             int frame,
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -51,6 +52,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             RenderOptionsData options,
             TileOptionsData tileOptions,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -62,6 +64,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             int endFrame,
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -74,6 +77,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             RenderOptionsData options,
             VideoOptionsData video,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default);
     }
 }
