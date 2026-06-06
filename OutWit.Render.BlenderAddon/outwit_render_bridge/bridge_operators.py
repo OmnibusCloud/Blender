@@ -29,6 +29,7 @@ from .bridge_launcher import (
 )
 from .bridge_scene_attachments import collect_scene_attachment_metadata, summarize_scene_attachment_metadata
 from .bridge_scene_packaging import create_packed_upload_copy, ScenePackagingError
+from .bridge_state import ALL_CLIENTS_GROUP_ID
 
 FORMAT_PNG = 0
 BLEND_MODE_CENTER_PRIORITY_CROP = 0
@@ -36,6 +37,14 @@ BLEND_MODE_CENTER_PRIORITY_CROP = 0
 
 def _get_context_directory(context) -> str:
     return get_effective_context_directory(context)
+
+
+def _get_selected_client_group_id(state) -> str:
+    """Resolves the Target dropdown to a group id, or '' for the unscoped 'all clients' option."""
+    selected = getattr(state, "selected_client_group", "") or ""
+    if not selected or selected == ALL_CLIENTS_GROUP_ID:
+        return ""
+    return selected
 
 
 def _get_runtime_state(context):
@@ -661,9 +670,10 @@ def _run_selected_launch(context):
 
     render_options = _collect_render_options(context)
     still_frame = _get_still_frame(context)
+    group_id = _get_selected_client_group_id(state)
 
     if state.render_mode == "Still":
-        response = client.run_render_still(blob_id, still_frame, render_options, _get_uploaded_attachment_manifest(state))
+        response = client.run_render_still(blob_id, still_frame, render_options, _get_uploaded_attachment_manifest(state), group_id)
         _apply_job_response(state, response, "RenderStill")
         return response
 
@@ -676,6 +686,7 @@ def _run_selected_launch(context):
             render_options,
             _collect_tile_options(state),
             _get_uploaded_attachment_manifest(state),
+            group_id,
         )
         _apply_job_response(state, response, "RenderStillTiled")
         return response
@@ -687,6 +698,7 @@ def _run_selected_launch(context):
             int(scene.frame_end),
             render_options,
             _get_uploaded_attachment_manifest(state),
+            group_id,
         )
         _apply_job_response(state, response, "RenderFrames")
         return response
@@ -698,6 +710,7 @@ def _run_selected_launch(context):
         render_options,
         _collect_video_options(state),
         _get_uploaded_attachment_manifest(state),
+        group_id,
     )
     _apply_job_response(state, response, "RenderVideo")
     return response
@@ -756,6 +769,10 @@ def _refresh_bridge_state(context) -> None:
     state.can_run_on_all_clients = scope_options.can_run_on_all_clients if scope_options else False
     state.group_count = len(scope_options.groups) if scope_options else 0
     state.project_count = len(scope_options.projects) if scope_options else 0
+    state.groups_json = (
+        json.dumps([{"id": group.group_id, "name": group.name} for group in scope_options.groups])
+        if scope_options else ""
+    )
     if state.is_signed_in and scope_error:
         state.status_message = "Signed in. Execution scope unavailable."
     else:

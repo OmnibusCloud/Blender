@@ -647,6 +647,8 @@ class OUTWIT_PT_bridge_launch_panel(Panel):
         scene = context.scene
 
         layout.prop(state, "render_mode")
+        if state.is_signed_in:
+            layout.prop(state, "selected_client_group")
         _draw_mode_specific_settings(layout, context, state)
         if state.render_mode in {"Frames", "Video"}:
             layout.label(text=f"Frames: {int(scene.frame_start)} - {int(scene.frame_end)}")

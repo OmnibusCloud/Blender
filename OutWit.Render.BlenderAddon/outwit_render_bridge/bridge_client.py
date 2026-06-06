@@ -24,6 +24,17 @@ from .bridge_models import (
 TResponse = TypeVar("TResponse")
 
 
+def _append_group(payload: list[Any], selected_client_group_id: str) -> None:
+    """Append the client-group id as a trailing positional arg when one is selected.
+
+    The bridge REST processor binds by exact parameter count, so adding the group id
+    routes the call to the group-targeted render overload; omitting it keeps the default
+    "any available client" overload. An empty / blank id means "all clients".
+    """
+    if selected_client_group_id and selected_client_group_id.strip():
+        payload.append(selected_client_group_id.strip())
+
+
 class BridgeClientError(Exception):
     pass
 
@@ -95,15 +106,10 @@ class BridgeClient:
             video,
         )
 
-    def run_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None) -> RunRenderResponse:
-        return self._post(
-            "RunRenderStillAsync",
-            RunRenderResponse.from_json,
-            scene_blob_id,
-            frame,
-            options,
-            attached_files or [],
-        )
+    def run_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None, selected_client_group_id: str = "") -> RunRenderResponse:
+        payload = [scene_blob_id, frame, options, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunRenderStillAsync", RunRenderResponse.from_json, *payload)
 
     def run_render_still_tiled(
         self,
@@ -114,18 +120,11 @@ class BridgeClient:
         options: dict[str, Any],
         tile_options: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
+        selected_client_group_id: str = "",
     ) -> RunRenderResponse:
-        return self._post(
-            "RunRenderStillTiledAsync",
-            RunRenderResponse.from_json,
-            scene_blob_id,
-            frame,
-            tiles_x,
-            tiles_y,
-            options,
-            tile_options,
-            attached_files or [],
-        )
+        payload = [scene_blob_id, frame, tiles_x, tiles_y, options, tile_options, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunRenderStillTiledAsync", RunRenderResponse.from_json, *payload)
 
     def run_render_frames(
         self,
@@ -134,16 +133,11 @@ class BridgeClient:
         end_frame: int,
         options: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
+        selected_client_group_id: str = "",
     ) -> RunRenderResponse:
-        return self._post(
-            "RunRenderFramesAsync",
-            RunRenderResponse.from_json,
-            scene_blob_id,
-            start_frame,
-            end_frame,
-            options,
-            attached_files or [],
-        )
+        payload = [scene_blob_id, start_frame, end_frame, options, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunRenderFramesAsync", RunRenderResponse.from_json, *payload)
 
     def run_render_video(
         self,
@@ -153,17 +147,11 @@ class BridgeClient:
         options: dict[str, Any],
         video: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
+        selected_client_group_id: str = "",
     ) -> RunRenderResponse:
-        return self._post(
-            "RunRenderVideoAsync",
-            RunRenderResponse.from_json,
-            scene_blob_id,
-            start_frame,
-            end_frame,
-            options,
-            video,
-            attached_files or [],
-        )
+        payload = [scene_blob_id, start_frame, end_frame, options, video, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunRenderVideoAsync", RunRenderResponse.from_json, *payload)
 
     def get_job(self, job_id: str) -> GetJobResponse:
         return self._post("GetJobAsync", GetJobResponse.from_json, job_id)

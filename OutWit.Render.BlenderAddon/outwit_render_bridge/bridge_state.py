@@ -1,8 +1,52 @@
 from __future__ import annotations
 
+import json
+
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 from bpy.types import PropertyGroup, WindowManager
+
+
+# Sentinel enum identifier for the "any available client" target (no specific group).
+ALL_CLIENTS_GROUP_ID = "__ALL__"
+
+# Blender keeps only weak references to the strings returned by a dynamic EnumProperty
+# items callback; if we build them inline they get garbage-collected and the UI shows
+# corrupted entries (or crashes). Hold a module-level reference to the last built list.
+_GROUP_ENUM_ITEMS_CACHE: list[tuple[str, str, str]] = []
+
+
+def selected_group_items(self, context):
+    """Builds the Target dropdown: 'All clients' (when allowed) + each authorized group.
+
+    Reads the groups the bridge reported for the signed-in user (serialized into
+    ``groups_json``) plus ``can_run_on_all_clients``. Identifier is the group id GUID,
+    or ``ALL_CLIENTS_GROUP_ID`` for the unscoped option.
+    """
+    items: list[tuple[str, str, str]] = []
+
+    if self.can_run_on_all_clients:
+        items.append((ALL_CLIENTS_GROUP_ID, "All clients", "Render on any available client"))
+
+    try:
+        groups = json.loads(self.groups_json) if self.groups_json else []
+    except (ValueError, TypeError):
+        groups = []
+
+    for group in groups:
+        group_id = str(group.get("id", "")).strip()
+        if not group_id:
+            continue
+        name = str(group.get("name", "")).strip() or group_id
+        items.append((group_id, name, f"Render on group '{name}'"))
+
+    # Always offer at least one option so the control is never empty.
+    if not items:
+        items.append((ALL_CLIENTS_GROUP_ID, "All clients", "Render on any available client"))
+
+    _GROUP_ENUM_ITEMS_CACHE.clear()
+    _GROUP_ENUM_ITEMS_CACHE.extend(items)
+    return _GROUP_ENUM_ITEMS_CACHE
 
 
 class OutWitBridgeRuntimeState(PropertyGroup):
@@ -26,6 +70,12 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     can_run_on_all_clients: BoolProperty(name="Can Run On All Clients", default=False)
     group_count: IntProperty(name="Group Count", default=0)
     project_count: IntProperty(name="Project Count", default=0)
+    groups_json: StringProperty(name="Groups Json", default="")
+    selected_client_group: EnumProperty(
+        name="Target",
+        description="Which clients to render on: all available clients, or a specific group",
+        items=selected_group_items,
+    )
     current_user_display_name: StringProperty(name="Display Name", default="")
     current_user_id: StringProperty(name="User Id", default="")
     last_error: StringProperty(name="Last Error", default="")
