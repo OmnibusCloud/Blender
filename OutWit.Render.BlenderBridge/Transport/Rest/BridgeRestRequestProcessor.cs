@@ -60,8 +60,21 @@ namespace OutWit.Render.BlenderBridge.Transport.Rest
             }
             catch (Exception e)
             {
-                return WitResponse.InternalServerError("Failed to process request", e);
+                return WitResponse.InternalServerError(DescribeError(e), e);
             }
+        }
+
+        private static string DescribeError(Exception e)
+        {
+            // Surface the real reason to the addon/test instead of a bare "Failed to process request".
+            var message = $"Failed to process request: {e.Message}";
+            var inner = e.InnerException;
+            while (inner != null)
+            {
+                message += $" -> {inner.GetType().Name}: {inner.Message}";
+                inner = inner.InnerException;
+            }
+            return message;
         }
 
         #endregion

@@ -92,6 +92,11 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         Task<RunRenderStillResponse> RunRenderStillAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles);
 
         /// <summary>
+        /// Launches the bundled RenderStill script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderStillResponse> RunRenderStillAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
+
+        /// <summary>
         /// Launches the bundled RenderStillTiled script.
         /// </summary>
         Task<RunRenderStillTiledResponse> RunRenderStillTiledAsync(
@@ -115,6 +120,19 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
             List<RenderSceneAttachmentRefData> attachedFiles);
 
         /// <summary>
+        /// Launches the bundled RenderStillTiled script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderStillTiledResponse> RunRenderStillTiledAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            Guid selectedClientGroupId);
+
+        /// <summary>
         /// Launches the bundled RenderFrames script.
         /// </summary>
         Task<RunRenderFramesResponse> RunRenderFramesAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options);
@@ -125,6 +143,11 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         Task<RunRenderFramesResponse> RunRenderFramesAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles);
 
         /// <summary>
+        /// Launches the bundled RenderFrames script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderFramesResponse> RunRenderFramesAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
+
+        /// <summary>
         /// Launches the bundled RenderVideo script.
         /// </summary>
         Task<RunRenderVideoResponse> RunRenderVideoAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video);
@@ -133,6 +156,11 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         /// Launches the bundled RenderVideo script with addon-provided attachment metadata.
         /// </summary>
         Task<RunRenderVideoResponse> RunRenderVideoAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles);
+
+        /// <summary>
+        /// Launches the bundled RenderVideo script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderVideoResponse> RunRenderVideoAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
 
         /// <summary>
         /// Returns the current summary of one bridge-launched cloud job.

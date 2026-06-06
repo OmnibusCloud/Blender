@@ -213,7 +213,9 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveStillScript(options.Engine);
 
-            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options }, selectedClientGroupId);
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, frame, options);
 
             Logger.LogInformation("Bridge RenderStill launched for blob {BlobId} at frame {Frame} with job {JobId}",
                 sceneBlobId,
@@ -250,7 +252,9 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveStillTiledScript(options.Engine);
 
-            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, tileOptions }, selectedClientGroupId);
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, tileOptions }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, frame, tilesX, tilesY, options, tileOptions);
 
             Logger.LogInformation("Bridge RenderStillTiled launched for blob {BlobId} at frame {Frame} with tiles {TilesX}x{TilesY} and job {JobId}",
                 sceneBlobId,
@@ -286,7 +290,9 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveFramesScript(options.Engine);
 
-            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options }, selectedClientGroupId);
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options);
 
             Logger.LogInformation("Bridge RenderFrames launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
                 sceneBlobId,
@@ -323,7 +329,9 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveVideoScript(options.Engine);
 
-            var handle = await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, video }, selectedClientGroupId);
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, video }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options, video);
 
             Logger.LogInformation("Bridge RenderVideo launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
                 sceneBlobId,
