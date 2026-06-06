@@ -104,3 +104,44 @@ Bridge **launch** itself IS covered (`BridgeLocalHost` in the local tests).
 3. **Scene fidelity** — format/alpha/(bit-depth) capture + honor, with a fidelity test.
 4. Then resume the 4-phase plan: bridge↔addon flow stabilization (Phase 2), publishing pipeline
    (Phase 3), UI/UX (Phase 4).
+
+---
+
+## Progress + OPEN: group-targeted submit fails (2026-06-06)
+
+**Done (committed):**
+- Audit recorded (this doc, `bea99f6`).
+- Group targeting wired in the BRIDGE (`e1301a4`): `BridgeRenderLaunchService` submits to a group via
+  the SDK funnel `SubmitAsync(scriptName, parameters, clientGroupId)` **only when a group is selected**;
+  the default (no-group) path keeps the proven typed `RunAsync<T…>` (commit `d7662ee` had switched ALL
+  submits to the untyped SubmitAsync — reverted to conditional). Channel exposes group-aware overloads
+  for Still/StillTiled/Frames/Video with a unique arity (`…attachments, Guid selectedClientGroupId`) so
+  the REST processor (binds by exact param count) can route them. The REST processor now surfaces the
+  real exception chain (`DescribeError`) instead of a bare "Failed to process request".
+
+**OPEN — the live group submit fails.** `FramesTargetedAtClientGroupLiveTest` (in the still-UNCOMMITTED
+`LocalTests/Live/BridgeLiveDistributionTests.cs`) uploads a scene then POSTs the 6-param group overload
+targeting group `b952dfd2-3483-4fe0-a266-c584cd13f591` (two machines, via OMNIBUSCLOUD_API_KEY). It fails
+in ~2 s at submit with an opaque **"Failed to process request"**; the detail did not surface remotely
+(the bare message implies the `task == null` branch OR the WitResponse not carrying the exception). A
+local all-clients test also fails, but at a GET (poll/download) — a SEPARATE pre-existing
+environment issue (local in-process render not staged here), NOT the submit.
+
+**Hypotheses (by likelihood):**
+1. The untyped `SubmitAsync(scriptName, object?[], group)` serializes the boxed parameters differently
+   from typed `RunAsync<T…>`, so the server can't bind them to the script signature.
+2. The api-key user is not an eligible member of the group, or the group's two clients aren't render-ready
+   (controller not loaded) → server rejects.
+3. A server-side bug in the group-targeted submit path.
+
+**NEXT SESSION — start at the WitCloud level (isolate SDK/server from the bridge/REST):**
+- Add/find a WitCloud-level test that submits a script with `IWitCloudScripts.SubmitAsync(scriptName,
+  parameters, clientGroupId)` (and via the typed builder `Prepare<…>().InGroup(groupId)`) against a live
+  or in-process server. Confirm (a) untyped SubmitAsync round-trips params == typed RunAsync, and (b)
+  group-targeted submission works server-side (auth + eligibility). 
+- If WitCloud-level group submit WORKS → the bug is in the bridge REST layer (the 6-param overload routing
+  / the `List<RenderSceneAttachmentRefData>` param serialization over REST, which the with-attachments
+  overloads may never have exercised).
+- If it FAILS → the bug is the SDK untyped SubmitAsync serialization or the server group-submit; get the
+  real server-side rejection from engine.omnibuscloud.com logs.
+- Then finish: addon group-selection UI (EnumProperty) → render operators; commit the live group test.
