@@ -1,0 +1,65 @@
+name: addon
+
+# Builds the per-platform Blender addon packages (self-contained bridge bundled) and attaches
+# them to the GitHub Release. Triggered by an `addon-v*` tag; can also be run manually.
+#
+# Native runner per platform so the self-contained single-file .NET bridge is produced on its own
+# OS (more reliable than cross-RID single-file publishing from one host). Ships the SELF-CONTAINED
+# variant (no .NET prerequisite for artists); framework-dependent can be added later if needed.
+#
+# Not yet automated here (see docs/addon-packaging-and-distribution.md §4): regenerating + publishing
+# the extension repository index.json for in-Blender auto-update — that needs the HTTPS host decided.
+
+on:
+  push:
+    tags:
+      - 'addon-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build addon package (${{ matrix.rid }}, self-contained)
+        shell: pwsh
+        run: ./OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1 -RuntimeIdentifier ${{ matrix.rid }} -DeploymentMode SelfContained
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-${{ matrix.rid }}
+          path: OutWit.Render.BlenderAddon/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/addon-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Attach addon zips to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
