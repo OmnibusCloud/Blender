@@ -57,6 +57,10 @@ namespace OutWit.Render.BlenderBridge.Services.Render
                 ScriptName = info.ScriptName,
                 Status = effectiveStatus,
                 OverallProgress = effectiveProgress,
+                // Distributed "computation" progress is a separate axis (the Grid.ForEach work the engine
+                // sees as one opaque stage); passed through raw — the effectiveProgress capping above is a
+                // display nicety for the coarse OverallProgress bar only.
+                DistributedProgress = info.DistributedProgress,
                 IsCompleted = isCompleted,
                 ResultBlobId = resultBlobId,
                 ResultBlobIds = resultBlobIds,

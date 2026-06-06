@@ -363,6 +363,7 @@ class GetJobResponse:
     script_name: str = ""
     status: str = ""
     overall_progress: float = 0.0
+    distributed_progress: float = 0.0
     is_completed: bool = False
     result_blob_id: str | None = None
     result_blob_ids: list[str | None] = field(default_factory=list)
@@ -376,6 +377,7 @@ class GetJobResponse:
             script_name=str(_get_value(data, "ScriptName") or ""),
             status=str(_get_value(data, "Status") or ""),
             overall_progress=float(_get_value(data, "OverallProgress") or 0.0),
+            distributed_progress=float(_get_value(data, "DistributedProgress") or 0.0),
             is_completed=bool(_get_value(data, "IsCompleted")),
             result_blob_id=str(_get_value(data, "ResultBlobId")) if _get_value(data, "ResultBlobId") is not None else None,
             result_blob_ids=[str(me) if me is not None else None for me in _get_value(data, "ResultBlobIds") or []],

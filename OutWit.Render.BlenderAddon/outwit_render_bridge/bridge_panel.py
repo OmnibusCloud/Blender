@@ -364,6 +364,24 @@ def _job_phase_label(state) -> str:
     return status
 
 
+def _draw_job_progress(layout, state) -> None:
+    # Two graphical bars (Blender 4.0+ layout.progress): "Overall" is the engine's coarse stage
+    # progress (whole script); "Computation" is the distributed render work that the engine sees as one
+    # opaque Grid.ForEach stage — it only shows while/after there is distributed work.
+    if state.active_job_progress:
+        layout.progress(
+            factor=state.active_job_progress_factor,
+            text=f"Overall: {state.active_job_progress}",
+            type="BAR",
+        )
+    if state.active_job_distributed_progress:
+        layout.progress(
+            factor=state.active_job_distributed_progress_factor,
+            text=f"Computation: {state.active_job_distributed_progress}",
+            type="BAR",
+        )
+
+
 def _result_phase_label(state) -> str:
     if state.download_primary_path or state.download_status == "Downloaded":
         return "Downloaded"
@@ -427,8 +445,7 @@ class OUTWIT_PT_bridge_panel(Panel):
 
         if _has_job_content(state):
             layout.label(text=f"Job: {_job_phase_label(state)}")
-            if state.active_job_progress:
-                layout.label(text=f"Progress: {state.active_job_progress}")
+            _draw_job_progress(layout, state)
 
 
 class OUTWIT_PT_bridge_connection_panel(Panel):
@@ -672,8 +689,7 @@ class OUTWIT_PT_bridge_job_panel(Panel):
         interval_row.enabled = state.auto_refresh_active_job
         interval_row.prop(state, "auto_refresh_interval_seconds", text="Interval")
         layout.label(text=f"Phase: {_job_phase_label(state)}")
-        if state.active_job_progress:
-            layout.label(text=f"Progress: {state.active_job_progress}")
+        _draw_job_progress(layout, state)
         if state.active_job_result_blob_id or state.active_job_result_blob_count > 0:
             layout.label(text=f"Result: {_result_phase_label(state)}")
         if state.active_job_error:

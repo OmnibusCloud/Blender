@@ -20,6 +20,7 @@ namespace OutWit.Render.BlenderBridge.Contracts
                    && ScriptName.Is(other.ScriptName)
                    && Status.Is(other.Status)
                    && OverallProgress.Is(other.OverallProgress)
+                   && DistributedProgress.Is(other.DistributedProgress)
                    && IsCompleted.Is(other.IsCompleted)
                    && ResultBlobId.Is(other.ResultBlobId)
                    && ResultBlobIds.Is(other.ResultBlobIds)
@@ -34,6 +35,7 @@ namespace OutWit.Render.BlenderBridge.Contracts
                 ScriptName = ScriptName,
                 Status = Status,
                 OverallProgress = OverallProgress,
+                DistributedProgress = DistributedProgress,
                 IsCompleted = IsCompleted,
                 ResultBlobId = ResultBlobId,
                 ResultBlobIds = [.. ResultBlobIds],
@@ -51,7 +53,12 @@ namespace OutWit.Render.BlenderBridge.Contracts
 
         public string Status { get; set; } = null!;
 
+        /// <summary>Coarse engine stage-based progress (0.0 to 1.0).</summary>
         public double OverallProgress { get; set; }
+
+        /// <summary>Fine-grained distributed "computation" progress (0.0 to 1.0); 0 when the job has no
+        /// distributed work.</summary>
+        public double DistributedProgress { get; set; }
 
         public bool IsCompleted { get; set; }
 

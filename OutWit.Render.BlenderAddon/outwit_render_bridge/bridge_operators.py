@@ -477,6 +477,9 @@ def _apply_job_response(state, response, script_name: str) -> None:
     state.active_job_script_name = script_name
     state.active_job_status = "Submitted"
     state.active_job_progress = "Starting..."
+    state.active_job_progress_factor = 0.0
+    state.active_job_distributed_progress = ""
+    state.active_job_distributed_progress_factor = 0.0
     state.active_job_error = response.message or ""
     state.active_job_result_blob_id = ""
     state.active_job_result_blob_count = 0
@@ -507,10 +510,32 @@ def _apply_get_job_response(state, response) -> None:
     else:
         progress_text = f"{min(progress_value, 99.0):.1f}%"
 
+    overall_factor = 1.0 if is_completed else max(0.0, min(progress_value / 100.0, 1.0))
+
+    # "Computation" bar = the distributed (render) work the engine sees as one opaque Grid.ForEach
+    # stage. Empty/0 (hidden) when the job has no distributed work; the server raises it to 100% at
+    # completion only for jobs that actually distributed.
+    distributed_value = response.distributed_progress
+    if distributed_value <= 1.0:
+        distributed_value *= 100.0
+
+    if distributed_value <= 0.0:
+        distributed_text = ""
+        distributed_factor = 0.0
+    elif is_completed:
+        distributed_text = "100.0%"
+        distributed_factor = 1.0
+    else:
+        distributed_text = f"{min(distributed_value, 100.0):.1f}%"
+        distributed_factor = max(0.0, min(distributed_value / 100.0, 1.0))
+
     state.active_job_id = response.job_id
     state.active_job_script_name = response.script_name
     state.active_job_status = response.status if is_terminal_status or progress_value > 0 else "Submitted"
     state.active_job_progress = progress_text
+    state.active_job_progress_factor = overall_factor
+    state.active_job_distributed_progress = distributed_text
+    state.active_job_distributed_progress_factor = distributed_factor
     state.active_job_error = response.error_message or ""
     state.active_job_result_blob_id = response.result_blob_id or ""
     state.active_job_result_blob_count = len(response.result_blob_ids)

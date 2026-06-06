@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, IntProperty, PointerProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 from bpy.types import PropertyGroup, WindowManager
 
 
@@ -99,6 +99,9 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     active_job_script_name: StringProperty(name="Active Job Script Name", default="")
     active_job_status: StringProperty(name="Active Job Status", default="")
     active_job_progress: StringProperty(name="Active Job Progress", default="")
+    active_job_progress_factor: FloatProperty(name="Active Job Progress Factor", default=0.0, min=0.0, max=1.0)
+    active_job_distributed_progress: StringProperty(name="Active Job Computation Progress", default="")
+    active_job_distributed_progress_factor: FloatProperty(name="Active Job Computation Progress Factor", default=0.0, min=0.0, max=1.0)
     active_job_error: StringProperty(name="Active Job Error", default="")
     active_job_result_blob_id: StringProperty(name="Active Job Result Blob Id", default="")
     active_job_result_blob_count: IntProperty(name="Active Job Result Blob Count", default=0)
