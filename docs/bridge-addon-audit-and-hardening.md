@@ -1,0 +1,106 @@
+# Bridge + Addon — audit & hardening plan (2026-06)
+
+**Context.** The Blender addon + its C# bridge were built to the point of *"the process works"* (submit a
+scene, render in the cloud, get a result back). To make it **actually usable** — and specifically to be
+the front-end of the **crowdcomputing portal (OmnibusCloud), the first public case** — two functionality
+gaps must close and the matching tests must exist. This doc records the audit and the plan.
+
+The user's 4-phase plan this slots into:
+1. **Bridge** — functionality audit, launch tests, **group / all-clients targeting**, user-available
+   groups (with interactive login).
+2. **Bridge↔addon flow** — correctness/stability, addon capability completeness.
+3. **Publishing** — pipeline → packaged extension zip + manifest + install/update doc.
+4. **UI/UX** — debug, verify, design.
+
+---
+
+## Finding 1 — Group targeting is NOT wired end-to-end (the portal's main flow)
+
+**State.** The bridge can *discover* the user's groups but cannot *target* one.
+
+- **Auth/groups discovery works.** The bridge does interactive **OIDC login** (PKCE, system browser,
+  loopback callback, token refresh, session persistence) and `GetExecutionScopeOptionsAsync()` returns the
+  RBAC-filtered `Groups[]` + `CanRunOnAllClients` for the signed-in user
+  (`Services/Auth/BridgeSessionService.cs`, `Services/Cloud/BridgeExecutionScopeService.cs`).
+- **But submission ignores the group.** Every render-launch method calls
+  `client.Scripts.RunAsync(scriptName, scene, …)` with **no `clientGroupId`**
+  (`Services/Render/BridgeRenderLaunchService.cs:215, 251, 286, 322`). The SDK supports it
+  (`IWitCloudScripts.SubmitAsync(… clientGroupId)` / `RunInGroupAsync(…)`) — the bridge never uses it.
+- **Addon mirrors the gap.** `bridge_operators.py:745` calls `get_execution_scope_options()` but only
+  stores **counts** (`group_count`, `can_run_on_all_clients`) and shows "All clients allowed: Yes/No"
+  (`bridge_panel.py:504`). There is **no group-selection UI** and render operators pass no group.
+
+**Result:** every job runs on "any available client". You can see *how many* groups you have, but cannot
+*run on one*. For closed-group crowdcomputing (the portal's first-class case) this is the missing core.
+
+**Fix (vertical slice):**
+1. Bridge: add `selectedClientGroupId` (Guid?) to the render-launch channel methods → pass to the SDK
+   (`SubmitAsync(… clientGroupId)` / `RunInGroupAsync`). `null`/empty = all clients (when allowed).
+2. Addon: group-selection UI (an EnumProperty: "All clients" + the user's groups) → thread the choice
+   into the render operators → bridge.
+3. **Tests (PRIORITY — this is the portal's main flow):** a bridge test that submits a render **to a
+   specific group** and asserts it was dispatched within that group; plus an explicit **all-clients**
+   case, and a **get-available-groups** test. Today there are **zero** tests for group targeting, login,
+   or group listing (see Test gaps below).
+
+---
+
+## Finding 2 — Scene fidelity: settings/assets travel, but output format/alpha/bit-depth are lost
+
+The local→remote scene transfer uses **two channels** and is *architecturally sound*:
+- the **uploaded .blend** (saved as-is) carries the rich state — color management, world/HDRI, motion
+  blur, compositing, materials, light paths;
+- a small **RenderOptions** set is captured live and overrides the .blend on the controller: Engine,
+  ResolutionX/Y (× %), Samples, Denoise, Format (`bridge_operators.py:73-88`);
+- a hard **`is_dirty` gate** refuses upload with unsaved edits (`bridge_operators.py:59-70`) so the live
+  scene always matches the uploaded file — **no silent divergence**;
+- **assets** are packed (`bpy.ops.file.pack_all()` in a temp subprocess, `bridge_scene_packaging.py`) +
+  attached as separate blobs (image sequences, linked .blend, fonts, caches, volumes, sounds, VSE —
+  `bridge_scene_attachments.py`).
+
+**Faithful today:** resolution, samples, engine, denoise, frame range, everything embedded in the .blend
+(look/world/motionblur/compositing/materials), and the packed/attached assets.
+
+**Gaps (mostly the addon under-capturing):**
+
+| Gap | Cause | Effect |
+|---|---|---|
+| **Output format hardcoded to PNG** | addon sends `Format=PNG` always (`bridge_operators.py:82`) | EXR/JPEG/TIFF ignored — **though the controller already supports OPEN_EXR/JPEG** (`Render/.../Utils/BlenderRenderArgsBuilder.cs:215-216`) |
+| **Alpha dropped** | controller forces `color_mode='RGB'` for PNG (`BlenderRenderArgsBuilder.cs:160`) | transparent renders (`film_transparent`) come back with no alpha → broken for compositing |
+| **8-bit only** | PNG 8-bit | no 16/32-bit EXR (HDR workflow impossible) |
+| **v1 policy blocks** non-portable scenes | `bridge_dependency_policy.py` | external-dependency / unbaked-sim (fluid/cloth/particle) scenes are **rejected with an explicit error** (not silent) — a capability ceiling |
+| **Unsaved edits** | `is_dirty` gate | upload blocked until the user saves — safe, but UX friction |
+
+**Fix (mostly addon, controller already mostly capable):**
+1. Capture `render.image_settings.file_format` → map to `Format` (PNG/EXR/JPEG) instead of the hardcode.
+2. Capture `color_mode` (RGB/RGBA) + `film_transparent` → forward so the controller honors alpha instead
+   of forcing RGB.
+3. (Optional) capture `color_depth` (8/16/32).
+This widens `RenderOptions` across addon + the bridge contract + the controller (honor `color_mode`).
+
+---
+
+## Test gaps (bridge)
+
+`OutWit.Render.BlenderBridge.Tests` (unit): REST transport + lease + connection-context lifecycle only.
+`…LocalTests` + `…LocalTests/Live`: render of every type/engine against mock + live cloud, and the
+distribution/balance suite. **Missing:**
+
+- ✗ **Group-targeted render** (the priority — portal's main flow)
+- ✗ **All-clients** asserted explicitly (only implicit today)
+- ✗ **Get-available-groups** (`GetExecutionScopeOptionsAsync`)
+- ✗ Interactive **OIDC login** flow + token refresh + session restore
+- ✗ Output-format / alpha fidelity (once Finding 2 lands)
+
+Bridge **launch** itself IS covered (`BridgeLocalHost` in the local tests).
+
+---
+
+## Order of work
+
+1. **Record** (this doc). ✅
+2. **Group targeting + tests** — bridge param → SDK → addon selection → group-launch test (local) +
+   get-groups + all-clients. *Priority: the crowdcomputing portal's main flow.*
+3. **Scene fidelity** — format/alpha/(bit-depth) capture + honor, with a fidelity test.
+4. Then resume the 4-phase plan: bridge↔addon flow stabilization (Phase 2), publishing pipeline
+   (Phase 3), UI/UX (Phase 4).
