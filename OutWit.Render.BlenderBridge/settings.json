@@ -1,7 +1,7 @@
 {
   "Bridge": {
     "ServerUrl": "https://engine.omnibuscloud.com",
-    "IdentityUrl": "https://id.waveslogic.com",
+    "IdentityUrl": "https://auth.omnibuscloud.com",
     "LocalRestUrl": "http://127.0.0.1:17777/bridge/",
     "SessionStoragePath": "BridgeSession",
     "DownloadCachePath": "BridgeCache",
