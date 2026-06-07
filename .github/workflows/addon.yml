@@ -3,9 +3,12 @@ name: addon
 # Builds the per-platform Blender addon packages (self-contained bridge bundled) and attaches
 # them to the GitHub Release. Triggered by an `addon-v*` tag; can also be run manually.
 #
-# Native runner per platform so the self-contained single-file .NET bridge is produced on its own
-# OS (more reliable than cross-RID single-file publishing from one host). Ships the SELF-CONTAINED
-# variant (no .NET prerequisite for artists); framework-dependent can be added later if needed.
+# All three RIDs are cross-published from a single Linux runner. This is deliberate: the bridge weaves
+# aspects with AspectInjector at build time, and its osx-arm64 native tool gets SIGKILL'd by Gatekeeper
+# on the macOS runner. On Linux the (managed) weaving runs with the Linux tool and `dotnet publish -r
+# <rid>` still produces a working self-contained build for every target. Ships the SELF-CONTAINED
+# variant (no .NET prerequisite for artists). macOS code-signing/notarization is a separate production
+# step (see signing strategy); unsigned is fine for debug builds.
 #
 # Not yet automated here (see docs/addon-packaging-and-distribution.md §4): regenerating + publishing
 # the extension repository index.json for in-Blender auto-update — that needs the HTTPS host decided.
@@ -21,17 +24,11 @@ permissions:
 
 jobs:
   build:
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            rid: win-x64
-          - os: ubuntu-latest
-            rid: linux-x64
-          - os: macos-latest
-            rid: osx-arm64
-    runs-on: ${{ matrix.os }}
+        rid: [win-x64, linux-x64, osx-arm64]
     steps:
       - uses: actions/checkout@v4
 

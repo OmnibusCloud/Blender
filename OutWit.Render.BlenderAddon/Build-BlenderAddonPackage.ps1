@@ -140,11 +140,20 @@ if (Test-Path $stagedManifest)
     $platformsLine = "platforms = [`"$platformTag`"]"
     if ($stagedManifestContent -match '(?m)^\s*platforms\s*=.*$')
     {
+        # Replace an existing top-level platforms key.
         $stagedManifestContent = [regex]::Replace($stagedManifestContent, '(?m)^\s*platforms\s*=.*$', $platformsLine)
+    }
+    elseif ($stagedManifestContent -match '(?m)^\[')
+    {
+        # Insert as a TOP-LEVEL key BEFORE the first TOML table header (e.g. [permissions]); a key
+        # placed after a table header would be parsed as belonging to that table, corrupting the manifest.
+        $tableHeaderRegex = [regex]'(?m)^\['
+        $stagedManifestContent = $tableHeaderRegex.Replace($stagedManifestContent, "$platformsLine`n`n[", 1)
     }
     else
     {
-        $stagedManifestContent = $stagedManifestContent.TrimEnd() + "`nplatforms = [`"$platformTag`"]`n"
+        # No tables in the manifest: a trailing top-level key is safe.
+        $stagedManifestContent = $stagedManifestContent.TrimEnd() + "`n$platformsLine`n"
     }
     Set-Content -Path $stagedManifest -Value $stagedManifestContent -NoNewline
 }
