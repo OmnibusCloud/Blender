@@ -8,6 +8,7 @@ import sys
 import bpy
 from bpy.types import Operator
 
+from .bridge_async import AsyncCall, JobMonitor, TERMINAL_STATUSES
 from .bridge_client import BridgeClient, BridgeClientError
 from .bridge_context import load_latest_context
 from .bridge_dependency_policy import get_dependency_portability_blocking_issue, get_simulation_cache_blocking_issue
@@ -79,6 +80,34 @@ def _map_color_depth(color_depth: str) -> int:
         "16": COLOR_DEPTH_16,
         "32": COLOR_DEPTH_32,
     }.get(color_depth or "", COLOR_DEPTH_DEFAULT)
+
+
+# Background monitor for the active job (polls GetJob off the UI thread). Owned by the auto-refresh
+# timer, which (re)starts it from (auto_refresh_active_job, active_job_id) and stops it on terminal/reset.
+_active_job_monitor: "JobMonitor | None" = None
+
+# How often the monitor polls GetJob while a job runs (seconds). Off the UI thread, so it can be brisk.
+_JOB_MONITOR_INTERVAL_SECONDS = 1.5
+
+
+def _tag_job_areas_redraw() -> None:
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type == "VIEW_3D":
+                area.tag_redraw()
+
+
+def _stop_job_monitor() -> None:
+    global _active_job_monitor
+    if _active_job_monitor is not None:
+        _active_job_monitor.stop()
+        _active_job_monitor = None
 
 
 def _get_context_directory(context) -> str:
@@ -569,12 +598,17 @@ def _apply_get_job_response(state, response) -> None:
 
     if is_completed:
         progress_text = "100.0%"
+    elif response.status == "Completed":
+        # Compute finished; the server marks Completed before the result blob is materialised. Show a
+        # full bar with a "finalizing" note instead of a stuck 99% (the old finalize-race "hang").
+        progress_text = "Finalizing result..."
     elif progress_value <= 0.0:
         progress_text = "Starting..."
     else:
         progress_text = f"{min(progress_value, 99.0):.1f}%"
 
-    overall_factor = 1.0 if is_completed else max(0.0, min(progress_value / 100.0, 1.0))
+    # Snap the bar to full on any terminal status (Completed-finalizing, Failed, Cancelled).
+    overall_factor = 1.0 if (is_completed or is_terminal_status) else max(0.0, min(progress_value / 100.0, 1.0))
 
     # "Computation" bar = the distributed (render) work the engine sees as one opaque Grid.ForEach
     # stage. Empty/0 (hidden) when the job has no distributed work; the server raises it to 100% at
@@ -656,26 +690,52 @@ def _load_result_image(path: str):
 
 
 def _auto_refresh_job_timer() -> float:
+    global _active_job_monitor
     context = getattr(bpy, "context", None)
     window_manager = getattr(context, "window_manager", None)
     state = getattr(window_manager, "outwit_bridge_state", None)
     if state is None:
         return 5.0
 
-    interval = float(max(1, int(state.auto_refresh_interval_seconds)))
+    idle_interval = float(max(1, int(state.auto_refresh_interval_seconds)))
     if not state.auto_refresh_active_job or not state.active_job_id:
-        return interval
+        _stop_job_monitor()
+        return idle_interval
 
-    try:
-        _refresh_active_job_state(context)
-        if state.active_job_is_completed:
-            state.auto_refresh_active_job = False
-            state.status_message = "Job completed. Auto-refresh stopped."
-    except Exception as ex:
-        state.last_error = str(ex)
-        state.status_message = "Auto-refresh failed."
+    # Ensure a background monitor for the current job. It polls GetJob OFF the UI thread, so progress
+    # no longer stalls on a slow main-thread poll, and the loop below only applies cheap snapshots.
+    monitor = _active_job_monitor
+    if monitor is None or monitor.job_id != state.active_job_id or monitor.stopped:
+        _stop_job_monitor()
+        try:
+            _active_job_monitor = JobMonitor(
+                _get_context_directory(context), state.active_job_id, _JOB_MONITOR_INTERVAL_SECONDS
+            ).start()
+            monitor = _active_job_monitor
+        except Exception as ex:
+            state.last_error = str(ex)
+            return idle_interval
 
-    return interval
+    snapshot, error, terminal = monitor.snapshot()
+    if snapshot is not None:
+        try:
+            _apply_get_job_response(state, snapshot)
+            _tag_job_areas_redraw()
+        except Exception as ex:
+            state.last_error = str(ex)
+    elif error is not None:
+        state.last_error = str(error)
+
+    if terminal or state.active_job_is_completed:
+        _stop_job_monitor()
+        state.auto_refresh_active_job = False
+        status = state.active_job_status or "finished"
+        state.status_message = "Job completed." if status == "Completed" else f"Job {status.lower()}."
+        _tag_job_areas_redraw()
+        return idle_interval
+
+    # While a job runs, tick the UI quickly to surface progress (the monitor itself polls at its own rate).
+    return 0.5
 
 
 def _bridge_lease_timer() -> float:
@@ -1127,6 +1187,60 @@ class OUTWIT_OT_bridge_refresh_job(Operator):
             return {"CANCELLED"}
 
 
+def _reset_preflight_state(state) -> None:
+    state.preflight_status = ""
+    state.preflight_message = ""
+    state.preflight_can_render_all = False
+    state.preflight_still_ready = False
+    state.preflight_frames_ready = False
+    state.preflight_still_tiled_ready = False
+    state.preflight_video_ready = False
+    for field in (
+        "preflight_still_issue_summary", "preflight_still_warning_summary",
+        "preflight_frames_issue_summary", "preflight_frames_warning_summary",
+        "preflight_still_tiled_issue_summary", "preflight_still_tiled_warning_summary",
+        "preflight_video_issue_summary", "preflight_video_warning_summary",
+        "preflight_issue_summary", "preflight_warning_summary",
+    ):
+        setattr(state, field, "")
+
+
+class OUTWIT_OT_bridge_reset_job(Operator):
+    bl_idname = "outwit.bridge_reset_job"
+    bl_label = "Reset"
+    bl_description = "Clear the current job, preflight result and last error to start over (keeps the uploaded scene)"
+
+    def execute(self, context):
+        state = _get_runtime_state(context)
+        _stop_job_monitor()
+
+        state.auto_refresh_active_job = False
+        state.active_job_id = ""
+        state.active_job_script_name = ""
+        state.active_job_status = ""
+        state.active_job_progress = ""
+        state.active_job_progress_factor = 0.0
+        state.active_job_distributed_progress = ""
+        state.active_job_distributed_progress_factor = 0.0
+        state.active_job_error = ""
+        state.active_job_result_blob_id = ""
+        state.active_job_result_blob_count = 0
+        state.active_job_is_completed = False
+
+        state.download_status = ""
+        state.download_message = ""
+        state.download_primary_path = ""
+        state.download_primary_file_name = ""
+        state.download_item_count = 0
+
+        _reset_preflight_state(state)
+        state.last_error = ""
+        state.status_message = "Ready."
+        _tag_job_areas_redraw()
+        self.report({"INFO"}, "Reset. Ready to render again.")
+        return {"FINISHED"}
+
+
 class OUTWIT_OT_bridge_download_result(Operator):
     bl_idname = "outwit.bridge_download_result"
     bl_label = "Download Result"
@@ -1225,6 +1339,7 @@ CLASSES = (
     OUTWIT_OT_bridge_run_preflight,
     OUTWIT_OT_bridge_launch_render,
     OUTWIT_OT_bridge_refresh_job,
+    OUTWIT_OT_bridge_reset_job,
     OUTWIT_OT_bridge_download_result,
     OUTWIT_OT_bridge_open_result,
     OUTWIT_OT_bridge_open_result_folder,

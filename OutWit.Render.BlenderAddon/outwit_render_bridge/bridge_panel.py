@@ -687,6 +687,8 @@ class OUTWIT_PT_bridge_job_panel(Panel):
         refresh_job.enabled = _has_active_job(state)
         refresh_job.operator("outwit.bridge_refresh_job", text="Refresh")
         refresh_job.prop(state, "auto_refresh_active_job", text="Auto Refresh")
+        # Reset is always available so a stuck job/error can be cleared without restarting Blender.
+        layout.operator("outwit.bridge_reset_job", text="Reset", icon="LOOP_BACK")
         interval_row = layout.row()
         interval_row.enabled = state.auto_refresh_active_job
         interval_row.prop(state, "auto_refresh_interval_seconds", text="Interval")
