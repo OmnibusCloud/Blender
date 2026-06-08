@@ -46,13 +46,15 @@ _VIDEO_FILE_FORMATS = {"FFMPEG", "AVI_JPEG", "AVI_RAW"}
 
 
 def recommended_render_mode(scene: bpy.types.Scene) -> str:
-    """The render mode that best fits the scene's output settings, so the addon doesn't default to
-    Video for a single still (or Still for an animation):
-      - a video output format -> "Video";
-      - otherwise a single frame (start == end) -> "Still";
-      - otherwise a frame range -> "Frames".
-    Tiled-still is an opt-in specialization and is never auto-recommended.
-    """
+    """The safe default render mode for a scene's output settings:
+      - a video output format -> "Video" (the artist clearly wants a movie);
+      - otherwise -> "Still".
+
+    We deliberately do NOT auto-pick Frames from a frame range: a .blend often carries a wide default
+    range (e.g. 1-10000) that the artist never intends to render, and Frames/Video are the expensive
+    modes. Defaulting to the cheap single-frame Still avoids accidentally launching thousands of frames;
+    rendering an animation is always an explicit choice (the panel still nudges toward Frames when the
+    scene has a real range — see has_multi_frame_range)."""
     render = getattr(scene, "render", None)
     image_settings = getattr(render, "image_settings", None) if render is not None else None
     file_format = (getattr(image_settings, "file_format", "") or "") if image_settings is not None else ""
@@ -60,10 +62,17 @@ def recommended_render_mode(scene: bpy.types.Scene) -> str:
     if file_format in _VIDEO_FILE_FORMATS:
         return "Video"
 
-    if int(getattr(scene, "frame_start", 1)) == int(getattr(scene, "frame_end", 1)):
-        return "Still"
+    return "Still"
 
-    return "Frames"
+
+def scene_frame_count(scene: bpy.types.Scene) -> int:
+    start = int(getattr(scene, "frame_start", 1))
+    end = int(getattr(scene, "frame_end", 1))
+    return max(1, end - start + 1)
+
+
+def has_multi_frame_range(scene: bpy.types.Scene) -> bool:
+    return scene_frame_count(scene) > 1
 
 
 def render_mode_matches_recommendation(current_mode: str, recommended_mode: str) -> bool:

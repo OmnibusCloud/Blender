@@ -7,7 +7,12 @@ from bpy.types import Panel
 
 from .branding import get_logo_icon_id
 from .bridge_dependency_policy import get_dependency_portability_blocking_issue, get_simulation_cache_blocking_issue
-from .bridge_engine_routing import recommended_render_mode, render_mode_matches_recommendation
+from .bridge_engine_routing import (
+    has_multi_frame_range,
+    recommended_render_mode,
+    render_mode_matches_recommendation,
+    scene_frame_count,
+)
 
 
 def _get_runtime_state(context):
@@ -655,12 +660,20 @@ class OUTWIT_PT_bridge_launch_panel(Panel):
             hint = layout.row(align=True)
             hint.label(text=f"Recommended: {recommended}", icon="INFO")
             hint.operator("outwit.bridge_use_recommended_mode", text="Use")
+        elif state.render_mode in {"Still", "StillTiled"} and has_multi_frame_range(scene):
+            # On a still mode but the scene spans many frames — inform without forcing the expensive mode.
+            layout.label(
+                text=f"Still renders 1 frame. Scene has {scene_frame_count(scene)} frames — pick Frames for animation.",
+                icon="INFO",
+            )
 
         if state.is_signed_in:
             layout.prop(state, "selected_client_group")
         _draw_mode_specific_settings(layout, context, state)
         if state.render_mode in {"Frames", "Video"}:
-            layout.label(text=f"Frames: {int(scene.frame_start)} - {int(scene.frame_end)}")
+            layout.label(
+                text=f"Frames: {int(scene.frame_start)} - {int(scene.frame_end)}  ({scene_frame_count(scene)} frames)"
+            )
 
         layout.label(text=f"Blend: {os.path.basename(state.current_blend_path) if state.current_blend_path else 'Not saved'}")
         if state.current_blend_is_dirty:
@@ -668,14 +681,16 @@ class OUTWIT_PT_bridge_launch_panel(Panel):
 
         _draw_policy_box(layout, state)
 
-        # Prominent primary action: one Render button (upload -> validate -> preflight -> submit), with a
-        # smaller preflight-only Check beside it.
-        render_row = layout.row(align=True)
-        render_row.enabled = _can_start_render(state) and not state.current_blend_is_dirty
-        render_button = render_row.row(align=True)
-        render_button.scale_y = 1.6
-        render_button.operator("outwit.bridge_launch_render", text="Render", icon="RENDER_STILL")
-        render_row.operator("outwit.bridge_run_preflight", text="Check")
+        # Primary action: one big Render button on its own row (upload -> validate -> preflight -> submit);
+        # the preflight-only Check sits on a separate row below it.
+        launch_enabled = _can_start_render(state) and not state.current_blend_is_dirty
+        render_row = layout.row()
+        render_row.enabled = launch_enabled
+        render_row.scale_y = 1.6
+        render_row.operator("outwit.bridge_launch_render", text="Render", icon="RENDER_STILL")
+        check_row = layout.row()
+        check_row.enabled = launch_enabled
+        check_row.operator("outwit.bridge_run_preflight", text="Check")
 
 
 class OUTWIT_PT_bridge_job_panel(Panel):

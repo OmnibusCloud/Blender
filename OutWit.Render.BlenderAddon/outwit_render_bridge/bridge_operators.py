@@ -16,6 +16,7 @@ from .bridge_engine_routing import (
     detect_scene_engine_family,
     get_scene_engine_token,
     recommended_render_mode,
+    scene_frame_count,
     SceneEngineRoutingError,
 )
 from .bridge_launcher import (
@@ -1188,6 +1189,11 @@ class OUTWIT_OT_bridge_use_recommended_mode(Operator):
         return {"FINISHED"}
 
 
+# Above this many frames, a Frames/Video launch asks for confirmation (a wide default .blend range can
+# otherwise kick off thousands of frames across the crowd by accident).
+_LARGE_FRAME_CONFIRM_THRESHOLD = 50
+
+
 class OUTWIT_OT_bridge_launch_render(Operator):
     bl_idname = "outwit.bridge_launch_render"
     bl_label = "Launch Render"
@@ -1196,6 +1202,22 @@ class OUTWIT_OT_bridge_launch_render(Operator):
     _task = None
     _timer = None
     _blend_path = ""
+    _pending_frame_count = 0
+
+    def invoke(self, context, event):
+        state = _get_runtime_state(context)
+        if state.render_mode in {"Frames", "Video"}:
+            count = scene_frame_count(context.scene)
+            if count > _LARGE_FRAME_CONFIRM_THRESHOLD:
+                self._pending_frame_count = count
+                return context.window_manager.invoke_props_dialog(self, width=340)
+        return self.execute(context)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=f"This will render {self._pending_frame_count} frames on the cloud.", icon="ERROR")
+        layout.label(text="That can take a long time and a lot of compute.")
+        layout.label(text="Continue?")
 
     def execute(self, context):
         global _launch_in_progress
