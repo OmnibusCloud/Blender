@@ -86,6 +86,10 @@ def _map_color_depth(color_depth: str) -> int:
 # timer, which (re)starts it from (auto_refresh_active_job, active_job_id) and stops it on terminal/reset.
 _active_job_monitor: "JobMonitor | None" = None
 
+# Guards against a second Launch while one is mid-flight (the modal upload is non-blocking, so the UI
+# stays clickable). Set in the launch operator's execute, cleared when it finishes/cancels.
+_launch_in_progress = False
+
 # How often the monitor polls GetJob while a job runs (seconds). Off the UI thread, so it can be brisk.
 _JOB_MONITOR_INTERVAL_SECONDS = 1.5
 
@@ -557,6 +561,34 @@ def _ensure_current_scene_uploaded(context):
 
     state.current_blend_path = blend_path
     return None
+
+
+def _upload_worker(context_directory: str, blend_path: str, planned_attachments: list) -> dict:
+    """Runs the SLOW part of a launch off the UI thread: attachment uploads + scene pack + .blend
+    upload. No bpy access (Blender is not thread-safe) — the caller gathers all scene data first."""
+    client = BridgeClient(context_directory)
+    attachments = _upload_scene_attachments(client, planned_attachments)
+    try:
+        with create_packed_upload_copy(blend_path) as (upload_path, packed_message):
+            response = client.upload_blend(upload_path)
+            upload_message = packed_message
+    except ScenePackagingError:
+        response = client.upload_blend(blend_path)
+        upload_message = ""
+    return {"response": response, "attachments": attachments, "upload_message": upload_message}
+
+
+def _apply_upload_result(state, blend_path: str, result: dict) -> None:
+    response = result["response"]
+    state.current_blend_path = blend_path
+    state.uploaded_blob_id = response.blob_id
+    state.uploaded_source_path = blend_path
+    state.uploaded_file_name = response.file_name
+    state.uploaded_file_size = response.file_size
+    state.uploaded_attachment_manifest_json = json.dumps(result["attachments"], ensure_ascii=False)
+    state.upload_message = result["upload_message"] or response.message or (
+        "Upload completed." if response.uploaded else "Upload did not complete."
+    )
 
 
 def _get_still_frame(context) -> int:
@@ -1128,11 +1160,95 @@ class OUTWIT_OT_bridge_launch_render(Operator):
     bl_label = "Launch Render"
     bl_description = "Launch the selected render mode through the local bridge"
 
+    _task = None
+    _timer = None
+    _blend_path = ""
+
     def execute(self, context):
+        global _launch_in_progress
         state = _get_runtime_state(context)
 
+        if _launch_in_progress:
+            self.report({"WARNING"}, "A launch is already in progress.")
+            return {"CANCELLED"}
+
+        # Main-thread: validate the scene is saved and gather all bpy-derived data up front, so the
+        # worker thread only does network/subprocess work (Blender's API is not thread-safe).
         try:
-            _ensure_current_scene_uploaded(context)
+            self._blend_path = _get_current_blend_path()
+        except Exception as ex:
+            state.last_error = str(ex)
+            state.status_message = str(ex)
+            self.report({"ERROR"}, str(ex))
+            return {"CANCELLED"}
+
+        if not _scene_requires_upload(state, self._blend_path):
+            # Scene already uploaded — just run the fast tail (validate -> preflight -> submit).
+            state.current_blend_path = self._blend_path
+            return self._finish_launch(context)
+
+        try:
+            planned_attachments = collect_scene_attachment_metadata()
+        except Exception as ex:
+            state.last_error = str(ex)
+            state.status_message = "Failed to collect scene attachments."
+            self.report({"ERROR"}, str(ex))
+            return {"CANCELLED"}
+
+        _apply_dependency_plan(state, planned_attachments)
+        context_directory = _get_context_directory(context)
+
+        _launch_in_progress = True
+        state.last_error = ""
+        state.status_message = "Uploading scene..."
+        self._task = AsyncCall(
+            lambda: _upload_worker(context_directory, self._blend_path, planned_attachments)
+        ).start()
+        self._timer = context.window_manager.event_timer_add(0.2, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        _tag_job_areas_redraw()
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type != "TIMER" or self._task is None or not self._task.done:
+            return {"PASS_THROUGH"}
+
+        global _launch_in_progress
+        state = _get_runtime_state(context)
+        self._cleanup(context)
+
+        if self._task.error is not None:
+            _launch_in_progress = False
+            message = str(self._task.error)
+            state.last_error = message
+            state.status_message = f"Upload failed: {message}"
+            self.report({"ERROR"}, message)
+            _tag_job_areas_redraw()
+            return {"CANCELLED"}
+
+        try:
+            _apply_upload_result(state, self._blend_path, self._task.result)
+        except Exception as ex:
+            _launch_in_progress = False
+            state.last_error = str(ex)
+            state.status_message = "Upload post-processing failed."
+            self.report({"ERROR"}, str(ex))
+            return {"CANCELLED"}
+
+        return self._finish_launch(context)
+
+    def _cleanup(self, context):
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        self._task = None
+
+    def _finish_launch(self, context):
+        # Fast tail on the main thread: validate -> preflight -> submit (small, quick calls). The slow
+        # upload already ran off-thread, so the UI is not frozen on it.
+        global _launch_in_progress
+        state = _get_runtime_state(context)
+        try:
             validation_response = _run_validate_blend(context)
             if not validation_response.is_valid:
                 raise BridgeClientError(
@@ -1154,6 +1270,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             response = _run_selected_launch(context)
             state.status_message = _selected_mode_launched_message(state)
             self.report({"INFO"}, response.message or response.status or "Render launched.")
+            _tag_job_areas_redraw()
             return {"FINISHED"}
         except BridgeClientError as ex:
             state.last_error = str(ex)
@@ -1165,6 +1282,8 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             state.status_message = "Render launch failed."
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
+        finally:
+            _launch_in_progress = False
 
 
 class OUTWIT_OT_bridge_refresh_job(Operator):
