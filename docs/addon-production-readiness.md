@@ -79,11 +79,23 @@ silent failure), but these are real production limits to lift over time:
 ---
 
 ## D. Done (for reference)
+- ✅ **Scene fidelity (section A) — DONE + live-verified 2026-06-08.** Output format (PNG/EXR/JPEG, no
+  longer hardcoded PNG), colour mode (RGBA/alpha), film transparency, bit depth now travel addon →
+  `RenderOptionsData` (1.2.0, appended fields, Default=legacy) → render controller (1.18.4,
+  `BuildImageOutputConfigurationPython` honours them). Shipped as WitCloud v1.5.12-beta + addon 0.1.1.
+  Confirmed: transparent RGBA render returns with alpha; JPEG returns as JPEG.
+  - ⚠️ **Known limit (section B):** **EXR is not supported for *Tiled Still*** — the tile stitcher is
+    ffmpeg `crop`+`overlay` (PNG/JPEG only); preflight correctly blocks it. EXR works in **Frames** and
+    non-tiled **Still**. Lifting it needs a float-EXR compositor (e.g. a Blender-python stitch step).
 - ✅ Group/all-clients targeting (addon Target dropdown → bridge group overload → SDK group submit),
   verified live (20/20 on a group).
 - ✅ Interactive OIDC login + scope discovery (groups list now surfaced, not just counts).
 - ✅ Asset packing (`pack_all`) + attachments; `is_dirty` safety gate.
 - ✅ Resolution (×%), samples, engine, denoise capture.
+
+> **Phase 4 (UX + responsiveness)** is now scoped in `bridge-addon-responsiveness-audit.md`: the blocking
+> UI, lagging progress, no-reset, and panel clutter — with a recommended phased plan (threaded operators +
+> adaptive poll + reset/cancel + UI consolidation now; SSE push next).
 
 ---
 
