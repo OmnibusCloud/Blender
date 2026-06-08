@@ -219,6 +219,11 @@ namespace OutWit.Render.BlenderBridge.Channels
             return JobQueryService.GetJobAsync(jobId);
         }
 
+        public Task<bool> CancelJobAsync(Guid jobId)
+        {
+            return JobQueryService.CancelJobAsync(jobId);
+        }
+
         public Task<DownloadResultResponse> DownloadResultAsync(Guid jobId)
         {
             return DownloadService.DownloadResultAsync(jobId);

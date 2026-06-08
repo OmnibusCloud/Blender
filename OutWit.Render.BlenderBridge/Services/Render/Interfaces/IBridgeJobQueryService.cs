@@ -11,5 +11,10 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
         /// Returns the current summary of one bridge-launched cloud job.
         /// </summary>
         Task<GetJobResponse> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Requests cancellation of one bridge-launched cloud job. Returns true on success.
+        /// </summary>
+        Task<bool> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     }
 }

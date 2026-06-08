@@ -168,6 +168,11 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         Task<GetJobResponse> GetJobAsync(Guid jobId);
 
         /// <summary>
+        /// Requests cancellation of one bridge-launched cloud job. Returns true on success.
+        /// </summary>
+        Task<bool> CancelJobAsync(Guid jobId);
+
+        /// <summary>
         /// Downloads the final result of one bridge-launched job into the local bridge download cache.
         /// </summary>
         Task<DownloadResultResponse> DownloadResultAsync(Guid jobId);

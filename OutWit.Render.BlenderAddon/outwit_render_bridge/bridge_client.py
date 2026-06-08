@@ -156,6 +156,9 @@ class BridgeClient:
     def get_job(self, job_id: str) -> GetJobResponse:
         return self._post("GetJobAsync", GetJobResponse.from_json, job_id)
 
+    def cancel_job(self, job_id: str) -> bool:
+        return self._post("CancelJobAsync", lambda data: bool(data), job_id)
+
     def download_result(self, job_id: str) -> DownloadResultResponse:
         return self._post("DownloadResultAsync", DownloadResultResponse.from_json, job_id)
 

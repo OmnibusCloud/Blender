@@ -68,6 +68,18 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             };
         }
 
+        public async Task<bool> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default)
+        {
+            if (jobId == Guid.Empty)
+                throw new InvalidOperationException("Job id is required.");
+
+            var client = await CloudConnectionService.GetClientAsync(cancellationToken)
+                         ?? throw new InvalidOperationException("Bridge is not connected to the cloud.");
+
+            await client.Jobs.CancelAsync(jobId, cancellationToken);
+            return true;
+        }
+
         private static async Task<List<Guid?>> GetResultBlobIdsAsync(IWitCloudJobs jobs, Guid jobId, CancellationToken cancellationToken)
         {
             var scalar = await TryResultAsync<Guid>(jobs, jobId, cancellationToken);

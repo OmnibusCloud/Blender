@@ -1325,6 +1325,34 @@ def _reset_preflight_state(state) -> None:
         setattr(state, field, "")
 
 
+class OUTWIT_OT_bridge_cancel_job(Operator):
+    bl_idname = "outwit.bridge_cancel_job"
+    bl_label = "Cancel"
+    bl_description = "Request cancellation of the running cloud job"
+
+    def execute(self, context):
+        state = _get_runtime_state(context)
+        if not state.active_job_id:
+            self.report({"WARNING"}, "No active job to cancel.")
+            return {"CANCELLED"}
+
+        try:
+            client = _get_bridge_client(context)
+            client.cancel_job(state.active_job_id)
+        except Exception as ex:
+            state.last_error = str(ex)
+            state.status_message = f"Cancel failed: {ex}"
+            self.report({"ERROR"}, str(ex))
+            return {"CANCELLED"}
+
+        # Leave the background monitor running: it observes the Cancelled terminal status, snaps the
+        # bar and stops itself (then the panel offers Reset).
+        state.status_message = "Cancellation requested."
+        self.report({"INFO"}, "Cancellation requested.")
+        _tag_job_areas_redraw()
+        return {"FINISHED"}
+
+
 class OUTWIT_OT_bridge_reset_job(Operator):
     bl_idname = "outwit.bridge_reset_job"
     bl_label = "Reset"
@@ -1459,6 +1487,7 @@ CLASSES = (
     OUTWIT_OT_bridge_run_preflight,
     OUTWIT_OT_bridge_launch_render,
     OUTWIT_OT_bridge_refresh_job,
+    OUTWIT_OT_bridge_cancel_job,
     OUTWIT_OT_bridge_reset_job,
     OUTWIT_OT_bridge_download_result,
     OUTWIT_OT_bridge_open_result,
