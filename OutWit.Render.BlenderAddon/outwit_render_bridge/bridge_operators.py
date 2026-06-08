@@ -1215,11 +1215,12 @@ class OUTWIT_OT_bridge_launch_render(Operator):
 
         global _launch_in_progress
         state = _get_runtime_state(context)
-        self._cleanup(context)
+        task = self._task
+        self._cleanup(context)  # removes the timer and clears self._task — read `task` after this
 
-        if self._task.error is not None:
+        if task.error is not None:
             _launch_in_progress = False
-            message = str(self._task.error)
+            message = str(task.error)
             state.last_error = message
             state.status_message = f"Upload failed: {message}"
             self.report({"ERROR"}, message)
@@ -1227,7 +1228,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             return {"CANCELLED"}
 
         try:
-            _apply_upload_result(state, self._blend_path, self._task.result)
+            _apply_upload_result(state, self._blend_path, task.result)
         except Exception as ex:
             _launch_in_progress = False
             state.last_error = str(ex)
