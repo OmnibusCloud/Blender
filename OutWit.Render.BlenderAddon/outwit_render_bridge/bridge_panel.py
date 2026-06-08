@@ -7,6 +7,7 @@ from bpy.types import Panel
 
 from .branding import get_logo_icon_id
 from .bridge_dependency_policy import get_dependency_portability_blocking_issue, get_simulation_cache_blocking_issue
+from .bridge_engine_routing import recommended_render_mode, render_mode_matches_recommendation
 
 
 def _get_runtime_state(context):
@@ -647,6 +648,14 @@ class OUTWIT_PT_bridge_launch_panel(Panel):
         scene = context.scene
 
         layout.prop(state, "render_mode")
+
+        # Nudge toward the mode that matches the scene's output (e.g. don't sit on Video for a still).
+        recommended = recommended_render_mode(scene)
+        if not render_mode_matches_recommendation(state.render_mode, recommended):
+            hint = layout.row(align=True)
+            hint.label(text=f"Recommended: {recommended}", icon="INFO")
+            hint.operator("outwit.bridge_use_recommended_mode", text="Use")
+
         if state.is_signed_in:
             layout.prop(state, "selected_client_group")
         _draw_mode_specific_settings(layout, context, state)
@@ -659,10 +668,14 @@ class OUTWIT_PT_bridge_launch_panel(Panel):
 
         _draw_policy_box(layout, state)
 
-        actions = layout.row(align=True)
-        actions.enabled = _can_start_render(state) and not state.current_blend_is_dirty
-        actions.operator("outwit.bridge_launch_render", text="Start")
-        actions.operator("outwit.bridge_run_preflight", text="Check")
+        # Prominent primary action: one Render button (upload -> validate -> preflight -> submit), with a
+        # smaller preflight-only Check beside it.
+        render_row = layout.row(align=True)
+        render_row.enabled = _can_start_render(state) and not state.current_blend_is_dirty
+        render_button = render_row.row(align=True)
+        render_button.scale_y = 1.6
+        render_button.operator("outwit.bridge_launch_render", text="Render", icon="RENDER_STILL")
+        render_row.operator("outwit.bridge_run_preflight", text="Check")
 
 
 class OUTWIT_PT_bridge_job_panel(Panel):

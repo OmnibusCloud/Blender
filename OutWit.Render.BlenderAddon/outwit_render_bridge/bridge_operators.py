@@ -15,6 +15,7 @@ from .bridge_dependency_policy import get_dependency_portability_blocking_issue,
 from .bridge_engine_routing import (
     detect_scene_engine_family,
     get_scene_engine_token,
+    recommended_render_mode,
     SceneEngineRoutingError,
 )
 from .bridge_launcher import (
@@ -792,6 +793,20 @@ def _bridge_lease_timer() -> float:
     return interval
 
 
+@bpy.app.handlers.persistent
+def _on_blend_load(_unused) -> None:
+    # When a .blend opens, default the render mode to the one that fits its output settings, so a still
+    # scene doesn't sit on Video (and vice versa). The user can still change it.
+    try:
+        window_manager = getattr(bpy.context, "window_manager", None)
+        state = getattr(window_manager, "outwit_bridge_state", None)
+        scene = getattr(bpy.context, "scene", None)
+        if state is not None and scene is not None:
+            state.render_mode = recommended_render_mode(scene)
+    except Exception:
+        pass
+
+
 def register_timers() -> None:
     if not bpy.app.timers.is_registered(_auto_refresh_job_timer):
         bpy.app.timers.register(_auto_refresh_job_timer, first_interval=5.0, persistent=True)
@@ -799,10 +814,16 @@ def register_timers() -> None:
     if not bpy.app.timers.is_registered(_bridge_lease_timer):
         bpy.app.timers.register(_bridge_lease_timer, first_interval=5.0, persistent=True)
 
+    if _on_blend_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_on_blend_load)
+
 
 def unregister_timers() -> None:
     if bpy.app.timers.is_registered(_auto_refresh_job_timer):
         bpy.app.timers.unregister(_auto_refresh_job_timer)
+
+    if _on_blend_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_blend_load)
 
 
 def _run_selected_launch(context):
@@ -1155,6 +1176,18 @@ class OUTWIT_OT_bridge_run_preflight(Operator):
             return {"CANCELLED"}
 
 
+class OUTWIT_OT_bridge_use_recommended_mode(Operator):
+    bl_idname = "outwit.bridge_use_recommended_mode"
+    bl_label = "Use Recommended Mode"
+    bl_description = "Switch the render mode to the one that matches the scene's output settings"
+
+    def execute(self, context):
+        state = _get_runtime_state(context)
+        state.render_mode = recommended_render_mode(context.scene)
+        self.report({"INFO"}, f"Render mode set to {state.render_mode}.")
+        return {"FINISHED"}
+
+
 class OUTWIT_OT_bridge_launch_render(Operator):
     bl_idname = "outwit.bridge_launch_render"
     bl_label = "Launch Render"
@@ -1485,6 +1518,7 @@ CLASSES = (
     OUTWIT_OT_bridge_upload_blend,
     OUTWIT_OT_bridge_validate_blend,
     OUTWIT_OT_bridge_run_preflight,
+    OUTWIT_OT_bridge_use_recommended_mode,
     OUTWIT_OT_bridge_launch_render,
     OUTWIT_OT_bridge_refresh_job,
     OUTWIT_OT_bridge_cancel_job,

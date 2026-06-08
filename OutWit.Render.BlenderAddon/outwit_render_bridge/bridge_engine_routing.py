@@ -41,6 +41,39 @@ def get_scene_engine_token(scene: bpy.types.Scene) -> str:
     return str(getattr(scene.render, "engine", "") or "")
 
 
+# Blender output formats that produce a video container (vs. a still image).
+_VIDEO_FILE_FORMATS = {"FFMPEG", "AVI_JPEG", "AVI_RAW"}
+
+
+def recommended_render_mode(scene: bpy.types.Scene) -> str:
+    """The render mode that best fits the scene's output settings, so the addon doesn't default to
+    Video for a single still (or Still for an animation):
+      - a video output format -> "Video";
+      - otherwise a single frame (start == end) -> "Still";
+      - otherwise a frame range -> "Frames".
+    Tiled-still is an opt-in specialization and is never auto-recommended.
+    """
+    render = getattr(scene, "render", None)
+    image_settings = getattr(render, "image_settings", None) if render is not None else None
+    file_format = (getattr(image_settings, "file_format", "") or "") if image_settings is not None else ""
+
+    if file_format in _VIDEO_FILE_FORMATS:
+        return "Video"
+
+    if int(getattr(scene, "frame_start", 1)) == int(getattr(scene, "frame_end", 1)):
+        return "Still"
+
+    return "Frames"
+
+
+def render_mode_matches_recommendation(current_mode: str, recommended_mode: str) -> bool:
+    """Whether the selected mode is an acceptable fit for the recommendation (tiled-still counts as a
+    valid specialization of Still, so picking it doesn't trigger a 'wrong mode' hint)."""
+    if current_mode == recommended_mode:
+        return True
+    return recommended_mode == "Still" and current_mode == "StillTiled"
+
+
 def _scene_uses_grease_pencil(scene: bpy.types.Scene) -> bool:
     for obj in getattr(scene, "objects", []):
         obj_type = str(getattr(obj, "type", "") or "")
