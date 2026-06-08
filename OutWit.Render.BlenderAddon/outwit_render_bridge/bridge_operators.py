@@ -32,7 +32,53 @@ from .bridge_scene_packaging import create_packed_upload_copy, ScenePackagingErr
 from .bridge_state import ALL_CLIENTS_GROUP_ID
 
 FORMAT_PNG = 0
+FORMAT_EXR = 1
+FORMAT_JPEG = 2
+
+# RenderColorMode / RenderFilmTransparency / RenderColorDepth — int values mirror the C# enum
+# declaration order in OutWit.Controller.Render.Model. 0 = Default (controller reproduces legacy
+# behaviour), so an old server that ignores these keys is unaffected.
+COLOR_MODE_DEFAULT = 0
+COLOR_MODE_RGB = 1
+COLOR_MODE_RGBA = 2
+
+FILM_TRANSPARENCY_DEFAULT = 0
+FILM_TRANSPARENCY_OPAQUE = 1
+FILM_TRANSPARENCY_TRANSPARENT = 2
+
+COLOR_DEPTH_DEFAULT = 0
+COLOR_DEPTH_8 = 1
+COLOR_DEPTH_16 = 2
+COLOR_DEPTH_32 = 3
+
 BLEND_MODE_CENTER_PRIORITY_CROP = 0
+
+
+def _map_render_format(file_format: str) -> int:
+    """Maps Blender's image_settings.file_format to the controller's RenderFormat. Unsupported formats
+    fall back to PNG (the controller supports PNG/EXR/JPEG)."""
+    return {
+        "PNG": FORMAT_PNG,
+        "OPEN_EXR": FORMAT_EXR,
+        "OPEN_EXR_MULTILAYER": FORMAT_EXR,
+        "JPEG": FORMAT_JPEG,
+    }.get(file_format or "", FORMAT_PNG)
+
+
+def _map_color_mode(color_mode: str) -> int:
+    if color_mode == "RGBA":
+        return COLOR_MODE_RGBA
+    if color_mode == "RGB":
+        return COLOR_MODE_RGB
+    return COLOR_MODE_DEFAULT
+
+
+def _map_color_depth(color_depth: str) -> int:
+    return {
+        "8": COLOR_DEPTH_8,
+        "16": COLOR_DEPTH_16,
+        "32": COLOR_DEPTH_32,
+    }.get(color_depth or "", COLOR_DEPTH_DEFAULT)
 
 
 def _get_context_directory(context) -> str:
@@ -86,14 +132,23 @@ def _collect_render_options(context) -> dict[str, object]:
     resolution_x = int(render.resolution_x * percentage / 100)
     resolution_y = int(render.resolution_y * percentage / 100)
     engine_family, engine_enum = detect_scene_engine_family(scene)
+    image_settings = render.image_settings
 
+    # Faithful snapshot of the scene's output settings so the cloud render matches the artist's setup:
+    # real output format (PNG/EXR/JPEG, not hardcoded PNG), colour mode (alpha/RGBA), film transparency
+    # and bit depth. The controller honours these; older servers ignore the new keys (legacy behaviour).
     return {
-        "Format": FORMAT_PNG,
+        "Format": _map_render_format(getattr(image_settings, "file_format", "") or ""),
         "Engine": engine_enum,
         "Samples": _get_scene_samples(scene, engine_family),
         "ResolutionX": resolution_x,
         "ResolutionY": resolution_y,
         "Denoise": _get_scene_denoise(scene, engine_family),
+        "ColorMode": _map_color_mode(getattr(image_settings, "color_mode", "") or ""),
+        "FilmTransparent": FILM_TRANSPARENCY_TRANSPARENT
+            if bool(getattr(render, "film_transparent", False))
+            else FILM_TRANSPARENCY_OPAQUE,
+        "ColorDepth": _map_color_depth(getattr(image_settings, "color_depth", "") or ""),
     }
 
 
