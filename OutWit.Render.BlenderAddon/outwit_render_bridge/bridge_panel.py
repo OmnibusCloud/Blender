@@ -308,7 +308,8 @@ def _draw_connection_gate(layout, state, view) -> None:
         box.label(text="Not signed in")
         login = box.row()
         login.scale_y = 1.4
-        login.enabled = state.is_connected_to_cloud
+        # Sign-in runs through the bridge's OIDC flow; it does NOT need the cloud-connected flag (which
+        # is normally false until a session exists). Reaching SIGNED_OUT already implies the bridge runs.
         login.operator("outwit.bridge_sign_in", text="Login", icon="URL")
         return
 
