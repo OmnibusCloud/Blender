@@ -16,6 +16,7 @@ This module is UI-free (it reads `scene`/`state`, never draws). The panel and op
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -157,6 +158,19 @@ def first_non_empty(*values: str) -> str:
         if value:
             return value
     return ""
+
+
+def target_option_count(state) -> int:
+    """How many render targets the Target dropdown would offer: 'All clients' (when allowed) plus each
+    authorized group. Mirrors bridge_state.selected_group_items so the panel can hide the control when
+    there is only one choice. Always >= 1 (the control falls back to a single 'All clients' entry)."""
+    count = 1 if getattr(state, "can_run_on_all_clients", False) else 0
+    try:
+        groups = json.loads(getattr(state, "groups_json", "") or "") or []
+    except (ValueError, TypeError):
+        groups = []
+    count += sum(1 for group in groups if str(group.get("id", "")).strip())
+    return max(1, count)
 
 
 # endregion

@@ -216,5 +216,34 @@ class ComputeStatusTests(unittest.TestCase):
         self.assertEqual(view.phase, status.Phase.RUNNING)
 
 
+class TargetOptionCountTests(unittest.TestCase):
+    """Drives the panel's 'show Target only when there is more than one choice' rule."""
+
+    def test_all_clients_only_is_one_option(self):
+        state = NS(can_run_on_all_clients=True, groups_json="")
+        self.assertEqual(status.target_option_count(state), 1)
+
+    def test_no_all_clients_no_groups_falls_back_to_one(self):
+        state = NS(can_run_on_all_clients=False, groups_json="")
+        self.assertEqual(status.target_option_count(state), 1)
+
+    def test_all_clients_plus_groups_counts_each(self):
+        state = NS(can_run_on_all_clients=True,
+                   groups_json='[{"id":"g1","name":"A"},{"id":"g2","name":"B"}]')
+        self.assertEqual(status.target_option_count(state), 3)
+
+    def test_groups_without_all_clients(self):
+        state = NS(can_run_on_all_clients=False, groups_json='[{"id":"g1","name":"A"}]')
+        self.assertEqual(status.target_option_count(state), 1)
+
+    def test_blank_group_ids_are_ignored(self):
+        state = NS(can_run_on_all_clients=True, groups_json='[{"id":"","name":"x"},{"id":"g2"}]')
+        self.assertEqual(status.target_option_count(state), 2)
+
+    def test_malformed_groups_json_is_safe(self):
+        state = NS(can_run_on_all_clients=True, groups_json="{not json")
+        self.assertEqual(status.target_option_count(state), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
