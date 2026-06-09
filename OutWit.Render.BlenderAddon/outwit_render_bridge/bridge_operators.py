@@ -32,7 +32,7 @@ from .bridge_launcher import (
 )
 from .bridge_scene_attachments import collect_scene_attachment_metadata, summarize_scene_attachment_metadata
 from .bridge_scene_packaging import create_packed_upload_copy, ScenePackagingError
-from .bridge_state import ALL_CLIENTS_GROUP_ID
+from .bridge_state import ALL_CLIENTS_GROUP_ID, apply_render_mode_to_axes
 
 FORMAT_PNG = 0
 FORMAT_EXR = 1
@@ -805,6 +805,7 @@ def _on_blend_load(_unused) -> None:
         scene = getattr(bpy.context, "scene", None)
         if state is not None and scene is not None:
             state.render_mode = recommended_render_mode(scene)
+            apply_render_mode_to_axes(state)
     except Exception:
         pass
 
@@ -1186,6 +1187,7 @@ class OUTWIT_OT_bridge_use_recommended_mode(Operator):
     def execute(self, context):
         state = _get_runtime_state(context)
         state.render_mode = recommended_render_mode(context.scene)
+        apply_render_mode_to_axes(state)
         self.report({"INFO"}, f"Render mode set to {state.render_mode}.")
         return {"FINISHED"}
 

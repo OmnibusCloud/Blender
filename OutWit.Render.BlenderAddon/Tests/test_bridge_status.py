@@ -253,5 +253,30 @@ class TargetOptionCountTests(unittest.TestCase):
         self.assertEqual(status.target_option_count(state), 1)
 
 
+class OutputAxisMappingTests(unittest.TestCase):
+    """The 2-axis Output model maps 1:1 onto the four internal render_mode paths."""
+
+    def test_image_maps_to_still(self):
+        self.assertEqual(status.render_mode_for_axes("Image", False, "Sequence"), "Still")
+
+    def test_image_split_maps_to_tiled(self):
+        self.assertEqual(status.render_mode_for_axes("Image", True, "Sequence"), "StillTiled")
+
+    def test_animation_sequence_maps_to_frames(self):
+        self.assertEqual(status.render_mode_for_axes("Animation", False, "Sequence"), "Frames")
+
+    def test_animation_video_maps_to_video(self):
+        self.assertEqual(status.render_mode_for_axes("Animation", False, "Video"), "Video")
+
+    def test_split_ignored_for_animation(self):
+        # split_frame only applies to Image; an Animation selection ignores it.
+        self.assertEqual(status.render_mode_for_axes("Animation", True, "Sequence"), "Frames")
+
+    def test_round_trip_every_mode(self):
+        for mode in ("Still", "StillTiled", "Frames", "Video"):
+            axis, split, result = status.axes_for_render_mode(mode)
+            self.assertEqual(status.render_mode_for_axes(axis, split, result), mode)
+
+
 if __name__ == "__main__":
     unittest.main()

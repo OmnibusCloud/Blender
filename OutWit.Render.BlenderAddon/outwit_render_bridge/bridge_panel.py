@@ -22,7 +22,6 @@ from .bridge_dependency_policy import (
     get_simulation_cache_blocking_issue,
 )
 from .bridge_engine_routing import (
-    has_multi_frame_range,
     recommended_render_mode,
     render_mode_matches_recommendation,
     scene_frame_count,
@@ -311,46 +310,59 @@ def _draw_connection_gate(layout, state, view) -> None:
         actions.operator("outwit.bridge_start", text="Connect", icon="PLAY")
 
 
-def _draw_mode_specific_settings(layout, context, state) -> None:
+def _recommendation_label(recommended: str) -> str:
+    # recommended_render_mode only ever returns "Still" or "Video".
+    return "Animation · Video" if recommended == "Video" else "Image"
+
+
+def _draw_output(layout, context, state, view) -> None:
+    """The artist-facing output, as two axes (the design's core simplification):
+      Output: Image | Animation; Image reveals a 'split across machines' toggle (-> tiles); Animation
+      reveals a frame range + Result: Sequence | Video (-> container/quality). These drive render_mode."""
     scene = context.scene
 
-    if state.render_mode in {"Still", "StillTiled"}:
-        layout.prop(state, "still_frame")
+    # Non-blocking nudge when the selection doesn't fit the scene's output (e.g. a video format on Image).
+    recommended = recommended_render_mode(scene)
+    if view.recommendation and not render_mode_matches_recommendation(state.render_mode, recommended):
+        hint = layout.row(align=True)
+        hint.label(text=f"Recommended: {_recommendation_label(view.recommendation)}", icon="INFO")
+        hint.operator("outwit.bridge_use_recommended_mode", text="Use")
+
+    layout.prop(state, "output_axis", expand=True)
+
+    if state.output_axis == "Image":
+        layout.prop(state, "still_frame", text="Frame")
+        layout.prop(state, "split_frame")
+        if state.split_frame:
+            tiles = layout.box()
+            tiles.prop(state, "tiles_x")
+            tiles.prop(state, "tiles_y")
+            tiles.prop(state, "tile_overlap_px")
+        return
+
+    # Animation: the frame range lives in the scene (single source of truth); editing here edits it.
+    frame_range = layout.row(align=True)
+    frame_range.prop(scene, "frame_start", text="Start")
+    frame_range.prop(scene, "frame_end", text="End")
+    layout.label(text=f"{scene_frame_count(scene)} frames")
+
+    layout.prop(state, "anim_result", expand=True)
+    if state.anim_result == "Sequence":
+        image_format = getattr(scene.render.image_settings, "file_format", "") or "—"
+        layout.label(text=f"Format: {image_format} (Output Properties)")
     else:
-        layout.label(text=f"Frames: {int(scene.frame_start)} - {int(scene.frame_end)}  ({scene_frame_count(scene)} frames)")
-
-    if state.render_mode == "StillTiled":
-        layout.prop(state, "tiles_x")
-        layout.prop(state, "tiles_y")
-        layout.prop(state, "tile_overlap_px")
-
-    if state.render_mode == "Video":
-        layout.prop(state, "video_frame_rate")
-        layout.prop(state, "video_constant_rate_factor")
+        video = layout.box()
+        video.prop(state, "video_frame_rate", text="FPS")
+        video.prop(state, "video_constant_rate_factor", text="Quality (CRF)")
+        video.label(text="Encodes after all frames return", icon="INFO")
 
 
 def _draw_render_setup(layout, context, state, view) -> None:
-    scene = context.scene
-
     # Target — only when there is more than one choice to make.
     if state.is_signed_in and target_option_count(state) > 1:
         layout.prop(state, "selected_client_group")
 
-    # Output mode (Phase 6 turns this into the Image|Animation axis; the dropdown maps to the same
-    # four internal paths for now).
-    layout.prop(state, "render_mode")
-    recommended = recommended_render_mode(scene)
-    if view.recommendation and not render_mode_matches_recommendation(state.render_mode, recommended):
-        hint = layout.row(align=True)
-        hint.label(text=f"Recommended: {view.recommendation}", icon="INFO")
-        hint.operator("outwit.bridge_use_recommended_mode", text="Use")
-    elif state.render_mode in {"Still", "StillTiled"} and has_multi_frame_range(scene):
-        layout.label(
-            text=f"Still renders 1 frame. Scene has {scene_frame_count(scene)} frames — pick Frames for animation.",
-            icon="INFO",
-        )
-
-    _draw_mode_specific_settings(layout, context, state)
+    _draw_output(layout, context, state, view)
 
     # One status line + one actionable blocker, from compute_status (replaces the Engine/Scene/Mode matrix).
     _draw_status(layout, view)

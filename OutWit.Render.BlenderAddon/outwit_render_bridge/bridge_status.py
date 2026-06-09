@@ -176,6 +176,33 @@ def target_option_count(state) -> int:
 # endregion
 
 
+# region Output axes <-> render_mode (the artist-facing 2-axis model maps onto the 4 internal paths)
+
+
+def render_mode_for_axes(output_axis: str, split_frame: bool, anim_result: str) -> str:
+    """The internal render_mode for a 2-axis selection. Image+split = StillTiled, Image = Still,
+    Animation+Video = Video, Animation = Frames."""
+    if output_axis == "Image":
+        return "StillTiled" if split_frame else "Still"
+    return "Video" if anim_result == "Video" else "Frames"
+
+
+def axes_for_render_mode(mode: str) -> tuple[str, bool, str]:
+    """Inverse: (output_axis, split_frame, anim_result) for a render_mode. The axis not implied by the
+    mode keeps a neutral default; callers apply only the relevant sub-control to avoid clobbering the
+    user's other-axis choice."""
+    if mode == "StillTiled":
+        return "Image", True, "Sequence"
+    if mode == "Frames":
+        return "Animation", False, "Sequence"
+    if mode == "Video":
+        return "Animation", False, "Video"
+    return "Image", False, "Sequence"
+
+
+# endregion
+
+
 # region Policy (consolidated from bridge_panel._*_policy — the single readiness/blocker authority)
 
 

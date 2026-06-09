@@ -6,6 +6,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 from bpy.types import PropertyGroup, WindowManager
 
+from .bridge_status import axes_for_render_mode, render_mode_for_axes
+
 
 # Sentinel enum identifier for the "any available client" target (no specific group).
 ALL_CLIENTS_GROUP_ID = "__ALL__"
@@ -47,6 +49,28 @@ def selected_group_items(self, context):
     _GROUP_ENUM_ITEMS_CACHE.clear()
     _GROUP_ENUM_ITEMS_CACHE.extend(items)
     return _GROUP_ENUM_ITEMS_CACHE
+
+
+# The artist-facing output is a 2-axis model (Output: Image|Animation, with a split toggle / a
+# Sequence|Video sub-axis). It maps 1:1 onto the four internal render_mode paths that the operators and
+# the controller already understand, so render_mode stays the single value everything reads — these axes
+# just derive it. Map: Image+split off = Still, Image+split on = StillTiled, Animation+Sequence = Frames,
+# Animation+Video = Video.
+def _sync_render_mode(self, context) -> None:
+    self.render_mode = render_mode_for_axes(self.output_axis, self.split_frame, self.anim_result)
+
+
+def apply_render_mode_to_axes(state) -> None:
+    """Reverse sync: reflect a render_mode set elsewhere (recommended-mode operator, .blend load) back
+    into the Output axes so the segmented controls match. Setting the axes re-derives the same
+    render_mode via _sync_render_mode (stable — no loop). Only the sub-control implied by the axis is
+    written, so switching axes does not clobber the other sub-control's last value."""
+    output_axis, split_frame, anim_result = axes_for_render_mode(state.render_mode)
+    state.output_axis = output_axis
+    if output_axis == "Image":
+        state.split_frame = split_frame
+    else:
+        state.anim_result = anim_result
 
 
 class OutWitBridgeRuntimeState(PropertyGroup):
@@ -144,6 +168,33 @@ class OutWitBridgeRuntimeState(PropertyGroup):
             ("Video", "Video", "Run RenderVideo for the current frame range"),
         ],
         default="Still",
+    )
+    # 2-axis artist-facing output (derives render_mode above via _sync_render_mode).
+    output_axis: EnumProperty(
+        name="Output",
+        description="What to render: a single image, or an animation over the frame range",
+        items=[
+            ("Image", "Image", "Render a single frame"),
+            ("Animation", "Animation", "Render the scene's frame range"),
+        ],
+        default="Image",
+        update=_sync_render_mode,
+    )
+    split_frame: BoolProperty(
+        name="Split frame across machines",
+        description="Tile the frame and render the tiles across multiple machines (heavy single frames)",
+        default=False,
+        update=_sync_render_mode,
+    )
+    anim_result: EnumProperty(
+        name="Result",
+        description="Deliver the animation as an image sequence, or a single encoded video",
+        items=[
+            ("Sequence", "Sequence", "Render each frame as an image (one file per frame)"),
+            ("Video", "Video", "Encode a single video after all frames return"),
+        ],
+        default="Sequence",
+        update=_sync_render_mode,
     )
     active_job_id: StringProperty(name="Active Job Id", default="")
     active_job_script_name: StringProperty(name="Active Job Script Name", default="")
