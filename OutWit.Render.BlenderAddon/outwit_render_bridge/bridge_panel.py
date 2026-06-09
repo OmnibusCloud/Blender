@@ -78,10 +78,6 @@ def _summary_items(summary: str) -> list[str]:
     return [item.strip() for item in (summary or "").split("|") if item.strip()]
 
 
-def _display_summary(summary: str) -> str:
-    return summary or "None"
-
-
 def _draw_issue_lines(layout, summary: str) -> None:
     for item in _summary_items(summary):
         layout.label(text=item)
@@ -179,16 +175,6 @@ def _validation_policy(state) -> str:
     return "Ready" if state.validate_is_valid else "Blocked"
 
 
-def _preflight_policy(state) -> str:
-    if not _has_preflight_result(state):
-        return "Not checked"
-    if state.preflight_issue_summary or not state.preflight_can_render_all:
-        return "Blocked"
-    if state.preflight_warning_summary:
-        return "Ready with warnings"
-    return "Ready"
-
-
 def _dependency_policy_message(state) -> str:
     return get_dependency_portability_blocking_issue(
         merge_unique_summaries(state.validate_warning_summary, _selected_mode_preflight_warning_summary(state))
@@ -220,12 +206,6 @@ def _selected_mode_policy(state) -> str:
     if state.validate_warning_summary or _selected_mode_preflight_warning_summary(state):
         return "Ready with warnings"
     return "Ready"
-
-
-def _mode_policy(is_ready: bool, has_result: bool) -> str:
-    if not has_result:
-        return "Not checked"
-    return "Ready" if is_ready else "Blocked"
 
 
 def _unsupported_engine_message(state) -> str:
@@ -282,19 +262,20 @@ def _draw_status(layout, view) -> None:
 
 
 def _draw_identity(layout, context, state) -> None:
+    # Compact brand lockup: mark + wordmark on the left, account + icon-only Logout right-aligned on the
+    # same line (matches the design's one-line identity row).
     icon_id = get_logo_icon_id(context)
-
     header = layout.row(align=True)
     if icon_id:
         header.template_icon(icon_value=icon_id, scale=1)
     header.label(text="OmnibusCloud")
 
     if state.is_signed_in:
-        identity = layout.row(align=True)
-        identity.label(text=state.current_user_display_name or "Signed in")
-        actions = identity.row(align=True)
-        actions.alignment = "RIGHT"
-        actions.operator("outwit.bridge_sign_out", text="Sign Out", icon="UNLOCKED")
+        account = header.row(align=True)
+        account.alignment = "RIGHT"
+        if state.current_user_display_name:
+            account.label(text=state.current_user_display_name)
+        account.operator("outwit.bridge_sign_out", text="", icon="UNLOCKED")
 
 
 def _draw_connection_gate(layout, state, view) -> None:
@@ -527,15 +508,16 @@ class OUTWIT_PT_bridge_connection_panel(Panel):
         layout = self.layout
         state = _get_runtime_state(context)
 
-        layout.label(text=f"Bridge: {'Running' if state.bridge_is_running else 'Stopped'}")
-        layout.label(text=f"Cloud: {'Connected' if state.is_connected_to_cloud else 'Offline'}")
-
+        layout.label(
+            text=f"Bridge: {'Running' if state.bridge_is_running else 'Stopped'}",
+            icon="CHECKMARK" if state.bridge_is_running else "X",
+        )
+        layout.label(
+            text=f"Cloud: {'Connected' if state.is_connected_to_cloud else 'Offline'}",
+            icon="CHECKMARK" if state.is_connected_to_cloud else "RADIOBUT_OFF",
+        )
         if state.bridge_version:
-            layout.label(text=f"Bridge version: {state.bridge_version}")
-        if state.bridge_launch_message:
-            layout.label(text=state.bridge_launch_message)
-        if state.last_error:
-            layout.label(text=state.last_error)
+            layout.label(text=f"Version: {state.bridge_version}")
 
         actions = layout.row(align=True)
         actions.operator("outwit.bridge_refresh_status", text="Refresh")
@@ -565,15 +547,13 @@ class OUTWIT_PT_bridge_account_panel(Panel):
         state = _get_runtime_state(context)
 
         layout.label(text=f"User: {state.current_user_display_name or '—'}")
-        if state.current_user_id:
-            layout.label(text=f"Id: {state.current_user_id}")
         layout.operator("outwit.bridge_sign_out", text="Logout", icon="UNLOCKED")
 
         layout.separator()
         layout.label(text=f"Can launch: {'Yes' if state.can_launch else 'No'}")
-        layout.label(text=f"All clients allowed: {'Yes' if state.can_run_on_all_clients else 'No'}")
-        layout.label(text=f"Groups: {state.group_count}")
-        layout.label(text=f"Projects: {state.project_count}")
+        layout.label(text=f"Groups: {state.group_count}   Projects: {state.project_count}")
+        if state.can_run_on_all_clients:
+            layout.label(text="All clients allowed")
 
 
 class OUTWIT_PT_bridge_scene_panel(Panel):
@@ -590,38 +570,25 @@ class OUTWIT_PT_bridge_scene_panel(Panel):
         state = _get_runtime_state(context)
 
         layout.label(text=f"File: {_blend_basename(state)}")
-        layout.label(text=f"Dirty: {'Yes' if state.current_blend_is_dirty else 'No'}")
-        layout.label(text=f"Frame range: {state.scene_frame_start} - {state.scene_frame_end}")
-        layout.label(text=f"Camera: {state.scene_camera_name or 'None'}")
-        layout.label(text=f"Engine: {state.scene_render_engine or 'Unknown'} ({state.scene_engine_family or 'Unknown'})")
-        layout.label(text=f"Format: {state.render_file_format or 'Unknown'}  Color: {state.render_color_mode or 'Unknown'}")
+        if state.current_blend_is_dirty:
+            layout.label(text="Unsaved changes", icon="ERROR")
+        layout.label(text=f"Frames: {state.scene_frame_start}-{state.scene_frame_end}   Camera: {state.scene_camera_name or 'None'}")
+        layout.label(text=f"Engine: {state.scene_engine_family or 'Unknown'}   Format: {state.render_file_format or '—'}")
 
         upload_row = layout.row()
         upload_row.enabled = bool(state.current_blend_path)
         upload_row.operator("outwit.bridge_upload_blend", text="Upload Blend")
-
         if state.uploaded_blob_id:
-            layout.label(text=f"Blob Id: {state.uploaded_blob_id}")
-            layout.label(text=f"File: {state.uploaded_file_name}")
-            layout.label(text=f"Size: {state.uploaded_file_size} bytes")
-            if state.upload_message:
-                layout.label(text=state.upload_message)
+            layout.label(text=f"Uploaded: {state.uploaded_file_name}", icon="CHECKMARK")
 
-        plan = layout.box()
-        plan.label(text="Dependency plan")
-        plan.label(text=f"Total discovered: {state.dependency_plan_total_count}")
-        plan.label(text=f"Packed in upload copy: {state.dependency_plan_packed_count}")
-        plan.label(text=_display_summary(state.dependency_plan_packed_summary))
-        plan.label(text=f"Uploaded separately: {state.dependency_plan_attachment_count}")
-        plan.label(text=_display_summary(state.dependency_plan_attachment_summary))
-        if state.dependency_plan_count_summary:
-            plan.label(text="By type")
-            _draw_issue_lines(plan, state.dependency_plan_count_summary)
-
+        if state.dependency_plan_total_count:
+            layout.label(
+                text=f"Dependencies: {state.dependency_plan_total_count} found · "
+                     f"{state.dependency_plan_packed_count} packed · {state.dependency_plan_attachment_count} attached"
+            )
         blocker = _dependency_plan_block_message(state)
         if blocker:
-            plan.label(text="Launch blocker", icon="ERROR")
-            plan.label(text=blocker)
+            layout.label(text=blocker, icon="ERROR")
 
 
 class OUTWIT_PT_bridge_manual_panel(Panel):
@@ -636,45 +603,23 @@ class OUTWIT_PT_bridge_manual_panel(Panel):
     def draw(self, context):
         layout = self.layout
         state = _get_runtime_state(context)
-        has_preflight_result = _has_preflight_result(state)
 
-        # Validate
+        # These run automatically as part of Render; exposed here only as manual escape hatches.
         validate_row = layout.row()
         validate_row.enabled = _has_uploaded_blob(state)
-        validate_row.operator("outwit.bridge_validate_blend", text="Validate Blend")
+        validate_row.operator("outwit.bridge_validate_blend", text="Validate")
         _draw_policy_line(layout, "Scene", _validation_policy(state))
-        if state.validate_status:
-            layout.label(text=f"Status: {state.validate_status}")
-        if state.validate_message:
-            layout.label(text=state.validate_message)
-        _draw_issue_lines(layout, state.validate_issue_summary)
-        _draw_issue_lines(layout, state.validate_warning_summary)
+        if _validation_policy(state) == "Blocked":
+            _draw_issue_lines(layout, state.validate_issue_summary)
 
         layout.separator()
 
-        # Preflight
-        layout.operator("outwit.bridge_run_preflight", text="Run Preflight")
+        layout.operator("outwit.bridge_run_preflight", text="Run preflight")
         _draw_policy_line(layout, _render_mode_label(state), _selected_mode_policy(state))
-        _draw_policy_line(layout, "All modes", _preflight_policy(state))
-        if state.preflight_message:
-            layout.label(text=state.preflight_message)
         if _selected_mode_policy(state) == "Blocked":
             _draw_issue_lines(layout, _selected_mode_preflight_issue_summary(state))
-        elif _selected_mode_preflight_warning_summary(state):
-            _draw_issue_lines(layout, _selected_mode_preflight_warning_summary(state))
-
-        matrix = layout.box()
-        matrix.label(text="Mode matrix")
-        _draw_policy_line(matrix, "Still", _mode_policy(state.preflight_still_ready, has_preflight_result))
-        _draw_policy_line(matrix, "Tiled still", _mode_policy(state.preflight_still_tiled_ready, has_preflight_result))
-        _draw_policy_line(matrix, "Frames", _mode_policy(state.preflight_frames_ready, has_preflight_result))
-        _draw_policy_line(matrix, "Video", _mode_policy(state.preflight_video_ready, has_preflight_result))
-        if state.preflight_status:
-            layout.label(text=f"Status: {state.preflight_status}")
-        if state.preflight_issue_summary and state.preflight_issue_summary != _selected_mode_preflight_issue_summary(state):
-            _draw_issue_lines(layout, state.preflight_issue_summary)
-        if state.preflight_warning_summary and state.preflight_warning_summary != _selected_mode_preflight_warning_summary(state):
-            _draw_issue_lines(layout, state.preflight_warning_summary)
+        if state.preflight_message:
+            layout.label(text=state.preflight_message)
 
 
 class OUTWIT_PT_bridge_error_panel(Panel):
