@@ -206,6 +206,82 @@ namespace OutWit.Render.BlenderBridge.LocalTests.Live
             });
         }
 
+        [Test]
+        public async Task GroupRenderCancelInterruptsInFlightLiveTest()
+        {
+            // Submit a LONG group render, let the nodes start rendering, then Cancel and measure how fast
+            // it goes terminal. v1 cancel semantics = "stop feeding tasks": the node finishes the task it
+            // is rendering right now, then skips the rest of the batch. So cancel latency ≈ ONE task (one
+            // frame), NOT the whole batch. Moderate per-frame cost so one frame is quick while the full
+            // batch is clearly minutes — the gap proves the batch was abandoned, not run to completion.
+            var groupId = ResolveGroupId();
+            const int startFrame = 1;
+            const int endFrame = 60;
+            var options = new RenderOptionsData
+            {
+                Format = RenderFormat.PNG,
+                Engine = RenderEngine.Cycles,
+                Samples = 64,
+                ResolutionX = 1280,
+                ResolutionY = 720
+            };
+
+            var scenePath = TestPaths.ResolveScene("benchmark_scene_video.blend", "greasepencil-bike.blend");
+            await RunBridgeAsync(17880, async (http, url, outputDir) =>
+            {
+                var upload = await UploadAsync(http, url, scenePath);
+                var client = await m_connection.GetClientAsync();
+                Assert.That(client, Is.Not.Null, "live SDK client must be connected");
+
+                var scene = new RenderSceneRefData
+                {
+                    BlendBlobId = upload.BlobId,
+                    AttachedFiles = new List<RenderSceneAttachmentRefData>()
+                };
+
+                var handle = await client!.Scripts.SubmitAsync(
+                    "RenderFramesCycles", new object?[] { scene, startFrame, endFrame, options }, groupId);
+                var jobId = handle.JobId;
+                Banner($"CANCEL TEST: submitted {endFrame - startFrame + 1}-frame render {jobId} -> group {groupId}");
+
+                ProcessingJobInfo status = null!;
+                for (var i = 0; i < 180; i++)
+                {
+                    status = await client.Jobs.GetStatusAsync(jobId);
+                    if (status.Status is ProcessingJobStatus.Processing or ProcessingJobStatus.Distributing)
+                        break;
+                    Assert.That(IsTerminal(status.Status), Is.False, $"job went terminal before cancel: {status.Status}");
+                    await Task.Delay(1000);
+                }
+                Banner($"status before cancel: {status.Status}, overall={status.OverallProgress:P0}");
+                Assert.That(status.Status, Is.AnyOf(ProcessingJobStatus.Processing, ProcessingJobStatus.Distributing),
+                    "job must be running on the nodes to exercise in-flight cancellation");
+
+                await Task.Delay(5000); // let the nodes actually start rendering
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                await client.Jobs.CancelAsync(jobId);
+                Banner("CANCEL requested");
+
+                while (sw.Elapsed < TimeSpan.FromMinutes(2))
+                {
+                    status = await client.Jobs.GetStatusAsync(jobId);
+                    if (IsTerminal(status.Status))
+                        break;
+                    await Task.Delay(1000);
+                }
+                Banner($"after cancel: {status.Status} in {sw.Elapsed.TotalSeconds:F0}s");
+
+                Assert.That(IsTerminal(status.Status), Is.True, "job must reach a terminal state after cancel");
+                // Generous window = a couple of in-flight tasks finishing across the nodes; far below the
+                // whole batch (60 frames). The point is the job stops promptly, not that it never finishes.
+                Assert.That(sw.Elapsed, Is.LessThan(TimeSpan.FromSeconds(90)),
+                    $"cancel should stop feeding tasks promptly, but the job took {sw.Elapsed.TotalSeconds:F0}s to go terminal (status {status.Status})");
+            });
+        }
+
+        private static bool IsTerminal(ProcessingJobStatus status) =>
+            status is ProcessingJobStatus.Completed or ProcessingJobStatus.Failed or ProcessingJobStatus.Cancelled;
+
         private static Guid ResolveGroupId()
         {
             var raw = Environment.GetEnvironmentVariable("OMNIBUSCLOUD_GROUP_ID");

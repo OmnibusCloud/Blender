@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmnibusCloud Render Bridge — дизайн панели аддона</title>
+<style>
+:root{
+  --page:#0f1118; --board:#171a24; --board-bd:#242a38;
+  --ink:#e9ecf2; --ink2:#aab2c2; --ink3:#727c90;
+  --lime:#9be04a; --lime-dim:#6f9e3a;
+  --font:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0; background:var(--page); color:var(--ink2); font-family:var(--font);
+  -webkit-font-smoothing:antialiased; line-height:1.5;
+  background-image:radial-gradient(circle at 1px 1px, rgba(255,255,255,.025) 1px, transparent 0);
+  background-size:24px 24px;
+}
+.wrap{max-width:1140px; margin:0 auto; padding:64px 28px 90px;}
+
+/* ---------- header ---------- */
+.hero{position:relative; padding-bottom:34px; margin-bottom:46px; border-bottom:1px solid var(--board-bd);}
+.hero::before{content:""; position:absolute; top:-120px; left:-60px; width:420px; height:260px;
+  background:radial-gradient(closest-side, rgba(155,224,74,.10), transparent); pointer-events:none;}
+.kicker{font-family:var(--mono); font-size:12px; letter-spacing:.28em; text-transform:uppercase; color:var(--lime); margin:0 0 18px;}
+h1{font-size:clamp(30px,5vw,44px); line-height:1.04; letter-spacing:-.022em; color:var(--ink); margin:0 0 16px; font-weight:700;}
+h1 .thin{font-weight:300; color:var(--ink2); letter-spacing:-.01em;}
+.lede{font-size:18px; max-width:62ch; margin:0 0 22px; color:var(--ink2);}
+.meta{font-family:var(--mono); font-size:12.5px; color:var(--ink3); display:flex; flex-wrap:wrap; gap:6px 18px;}
+.meta b{color:var(--ink2); font-weight:500;}
+
+/* ---------- sections ---------- */
+.section{margin:54px 0 0; opacity:0; transform:translateY(14px); animation:rise .7s cubic-bezier(.2,.7,.2,1) forwards;}
+@keyframes rise{to{opacity:1; transform:none;}}
+.section:nth-of-type(1){animation-delay:.05s}.section:nth-of-type(2){animation-delay:.12s}
+.section:nth-of-type(3){animation-delay:.19s}.section:nth-of-type(4){animation-delay:.26s}
+.section:nth-of-type(5){animation-delay:.33s}.section:nth-of-type(6){animation-delay:.40s}.section:nth-of-type(7){animation-delay:.47s}.section:nth-of-type(8){animation-delay:.54s}
+.s-head{display:flex; align-items:baseline; gap:14px; margin-bottom:6px;}
+.s-idx{font-family:var(--mono); font-size:13px; color:var(--lime); flex:none;}
+h2{font-size:21px; letter-spacing:-.01em; color:var(--ink); margin:0; font-weight:600;}
+.s-desc{font-size:14.5px; color:var(--ink2); max-width:70ch; margin:0 0 20px 38px;}
+.s-desc code{font-family:var(--mono); font-size:.88em; color:var(--lime); background:rgba(155,224,74,.08); padding:1px 5px; border-radius:4px;}
+
+.board{background:var(--board); border:1px solid var(--board-bd); border-radius:16px; padding:26px 24px;
+  box-shadow:0 14px 40px rgba(0,0,0,.34); }
+.note-strip{font-size:13px; color:var(--ink3); margin:14px 0 0 2px; font-family:var(--mono);}
+.note-strip b{color:var(--ink2); font-weight:500;}
+
+/* ---------- portfolio stage ---------- */
+.stage{display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start;}
+.col{display:flex; flex-direction:column; gap:9px; width:244px;}
+.cap{font-size:12px; font-weight:500; color:var(--ink); font-family:var(--font);}
+.cap small{display:block; font-weight:400; color:var(--ink3); margin-top:2px; font-size:11px;}
+
+/* ---------- blender panel (authentic grey) ---------- */
+.np{background:#303030; border:1px solid #1c1c1c; border-radius:5px; overflow:hidden; font-size:11.5px; color:#cfcfcf;}
+.np-h{display:flex; align-items:center; gap:6px; background:#3a3a3a; padding:5px 9px; color:#e8e8e8; font-weight:500; border-bottom:1px solid #262626; font-size:12px;}
+.tri{color:#9b9b9b; font-size:12px; display:inline-flex;}
+.np-b{padding:8px; display:flex; flex-direction:column; gap:7px;}
+.sub{background:#2c2c2c; border:1px solid #232323; border-radius:4px;}
+.sub-h{display:flex; align-items:center; gap:6px; background:#353535; padding:4px 9px; font-weight:500; color:#dedede; border-bottom:1px solid #262626; font-size:11.5px;}
+.sub-b{padding:8px 9px; display:flex; flex-direction:column; gap:7px;}
+.row{display:flex; align-items:center; gap:8px;}
+.lbl{flex:0 0 41%; color:#9c9c9c; font-size:11px;}
+.fld{flex:1; background:#222; border:1px solid #161616; border-radius:3px; padding:3px 8px; color:#d2d2d2; display:flex; justify-content:space-between; align-items:center; font-size:11px;}
+.num{flex:1; background:#222; border:1px solid #161616; border-radius:3px; padding:3px 9px; color:#d2d2d2; text-align:right; font-size:11px;}
+.rng{flex:1; display:flex; align-items:center; gap:6px;}
+.rng .dash{color:#7a7a7a; font-size:11px;}
+.caret{color:#8a8a8a; font-size:11px; display:inline-flex;}
+.seg{flex:1; display:flex; border:1px solid #161616; border-radius:3px; overflow:hidden;}
+.seg>div{flex:1; text-align:center; padding:3px 0; background:#2a2a2a; color:#b9b9b9; font-size:11px;}
+.seg>.on{background:#4a6fb5; color:#fff;}
+.btn{background:#474747; border:1px solid #1d1d1d; border-radius:3px; padding:5px 0; text-align:center; color:#dcdcdc; font-size:11px; display:flex; align-items:center; justify-content:center; gap:5px;}
+.btn.pri{padding:8px 0; background:#4f4f4f; color:#f0f0f0; font-weight:500; font-size:12px;}
+.btn.dim{color:#6e6e6e; background:#333; border-color:#242424;}
+.btn.fix{background:#34507e; border-color:#21314c; color:#dde6f5;}
+.btnrow{display:flex; gap:5px;} .btnrow .btn{flex:1;}
+.mini{display:inline-flex; align-items:center; background:#474747; border:1px solid #1d1d1d; border-radius:3px; padding:1px 7px; color:#dcdcdc; font-size:11px; margin-left:4px;}
+.note{font-size:11px; display:flex; align-items:center; gap:6px;}
+.ok{color:#8FC06A;} .warn{color:#EFA94D;} .info{color:#7FB0E0;} .mut{color:#8f8f8f;}
+.box{border:1px solid #242424; background:#262626; border-radius:4px; padding:7px 9px; display:flex; flex-direction:column; gap:4px;}
+.line{font-size:11px; color:#a9a9a9; display:flex; align-items:center; gap:5px;}
+.tiles,.vbox{border:1px solid #242424; background:#262626; border-radius:4px; padding:7px 9px; display:flex; flex-direction:column; gap:6px;}
+.tiles .th,.vbox .th{font-size:11px; color:#9c9c9c; display:flex; align-items:center; gap:5px;}
+.chk{display:flex; align-items:center; gap:8px; font-size:11px; color:#cfcfcf; padding:2px 0;}
+.box-sq{width:15px; height:15px; border:1px solid #161616; background:#222; border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; flex:none;}
+.box-sq.on{background:#4a6fb5;}
+.bar{height:15px; background:#202020; border:1px solid #161616; border-radius:3px; position:relative; overflow:hidden;}
+.bar>i{position:absolute; left:0; top:0; bottom:0; background:#5680c2;}
+.bar>span{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:11px; color:#eaeaea;}
+.sm-lbl{font-size:11px; color:#8f8f8f;}
+.dim-grp{display:flex; flex-direction:column; gap:7px; opacity:.45;}
+.coll{display:flex; align-items:center; gap:6px; background:#343434; padding:4px 9px; border:1px solid #232323; border-radius:4px; font-size:11px; color:#bdbdbd; font-weight:500;}
+.coll.in{margin-left:11px; background:#2e2e2e; font-weight:400; color:#9c9c9c;}
+.id{display:flex; align-items:center; gap:7px; font-size:11px; color:#cfcfcf;}
+.id .r{margin-left:auto; color:#8f97a6; font-size:11px;}
+.mk{width:18px; height:18px; border-radius:4px; background:#111; display:flex; align-items:center; justify-content:center; color:#5fd35f; font-size:12px; flex:none;}
+.accent{height:2px; width:42px; background:#5fd35f; border-radius:2px; margin-top:1px;}
+.flag{display:inline-block; background:#5a2330; color:#f1b7c0; border:1px solid #7a3040; border-radius:3px; font-size:11px; padding:0 6px; margin-left:6px;}
+
+/* ---------- principles ---------- */
+.principles{display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-top:4px;}
+.pr{background:var(--board); border:1px solid var(--board-bd); border-radius:12px; padding:16px 18px;}
+.pr h3{margin:0 0 5px; font-size:14.5px; color:var(--ink); font-weight:600; display:flex; align-items:baseline; gap:9px;}
+.pr h3 i{font-family:var(--mono); font-size:12px; color:var(--lime); font-style:normal;}
+.pr p{margin:0; font-size:13px; color:var(--ink2);}
+.pr p code{font-family:var(--mono); font-size:.86em; color:#cfe3b0;}
+
+.foot{margin-top:50px; padding-top:24px; border-top:1px solid var(--board-bd); font-family:var(--mono); font-size:12.5px; color:var(--ink3); line-height:1.7;}
+.foot b{color:var(--ink2); font-weight:500;}
+.foot .map{color:var(--ink2);}
+
+/* persistence table */
+.ptable-wrap{margin-top:22px; overflow-x:auto;}
+.ptable{width:100%; border-collapse:collapse; font-size:13px; min-width:560px;}
+.ptable th{text-align:left; font-family:var(--mono); font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink3); font-weight:500; padding:0 14px 10px; border-bottom:1px solid var(--board-bd);}
+.ptable td{padding:10px 14px; border-bottom:1px solid rgba(255,255,255,.05); color:var(--ink2); vertical-align:top;}
+.ptable td:first-child{color:var(--ink); font-weight:500;}
+.ptable td code{font-family:var(--mono); font-size:.86em; color:#cfe3b0;}
+.ptable tr.grp td{font-family:var(--mono); font-size:11.5px; letter-spacing:.03em; color:var(--lime); background:rgba(155,224,74,.06); border-bottom:1px solid var(--board-bd); padding-top:14px; padding-bottom:9px; font-weight:500;}
+.yes,.no{display:inline-block; font-family:var(--mono); font-size:11px; padding:1px 9px; border-radius:999px; font-weight:500; white-space:nowrap;}
+.yes{background:rgba(155,224,74,.14); color:#bfe88a; border:1px solid rgba(155,224,74,.32);}
+.no{background:rgba(255,255,255,.05); color:var(--ink3); border:1px solid var(--board-bd);}
+
+/* icons */
+.oclogo{display:inline-block; vertical-align:middle;}
+.wordmark{font-size:20px; font-weight:600; color:var(--ink); letter-spacing:-.01em; line-height:1;}
+.ic{display:inline-block; width:1em; height:1em; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; vertical-align:-.14em;}
+
+@media(max-width:560px){ .principles{grid-template-columns:1fr;} .wrap{padding:44px 18px 70px;} }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4.6 4.4 0 0 1 0-9 5 4.5 0 0 1 11 2h1a3.5 3.5 0 0 1 0 7z"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M18 13l-6 6-6-6"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.4"/><path d="M21 15l-5-5L5 21"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-2.5v9L16 14"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M11 7H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-5M10 14 20 4M15 4h5v5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-15-2M4 5v4h4M4 13a8 8 0 0 0 15 2M20 19v-4h-4"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 9v4M10.2 4 2 18a2 2 0 0 0 1.7 3h16.5a2 2 0 0 0 1.7-3L13.7 4a2 2 0 0 0-3.4 0zM12 17h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></symbol>
+  <symbol id="i-tiles" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M6 4h10l4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM14 4v4H8V4"/><circle cx="12" cy="14" r="2"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>
+  <symbol id="i-login" viewBox="0 0 24 24"><path d="M9 8V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-2"/><path d="M3 12h11M11 9l3 3-3 3"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M14 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-2"/><path d="M9 12h12M18 9l3 3-3 3"/></symbol>
+  <symbol id="oc-logo" viewBox="0 0 187.4999 187.4999"><g
+     style="fill:#f5f7fa;fill-opacity:1;stroke:#f5f7fa;stroke-width:2.83461;stroke-dasharray:none;stroke-opacity:1"
+     transform="matrix(0.98509517,0,0,0.98509517,1.3961793,0.32549754)"><g
+       style="fill:#f5f7fa;fill-opacity:1;stroke:#f5f7fa;stroke-width:2.83461;stroke-dasharray:none;stroke-opacity:1"><path
+         d="m 28.4801,79.5178 c -12.3358,2.8451 -21.5352,13.908 -21.5352,27.0706 0,15.3411 12.4854,27.7767 27.7977,27.7767 h 118.0147 c 15.3516,0 27.7977,-12.4671 27.7977,-27.7767 0,-13.0392 -9.0183,-23.9788 -21.1232,-26.9709 v 0 c 0.1916,-1.399 0.2887,-2.8268 0.2887,-4.2808 0,-17.2571 -13.9893,-31.2492 -31.249,-31.2492 -8.5092,0 -16.2256,3.4016 -21.8608,8.9212 C 99.7289,39.4734 85.6686,30.1979 69.4431,30.1979 c -23.0104,0 -41.6637,18.656 -41.6637,41.6664 0,2.6141 0.2388,5.1732 0.7007,7.6535 z m 138.18,-4.7743 c 12.2808,5.3517 20.8397,17.5957 20.8397,31.8449 0,19.1364 -15.5458,34.7216 -34.7188,34.7216 H 34.7189 C 15.5039,141.31 0,125.7642 0,106.5884 0,92.3444 8.6089,80.0716 20.9159,74.7225 v 0 c -0.0551,-0.9449 -0.0814,-1.8976 -0.0814,-2.8582 0,-26.845 21.7636,-48.6086 48.6086,-48.6086 15.9578,0 30.1204,7.6876 38.9839,19.5641 5.8267,-3.5984 12.6928,-5.6771 20.0445,-5.6771 20.8948,0 37.8737,16.7794 38.1886,37.6008 z"
+         style="fill:#f5f7fa;fill-opacity:1;fill-rule:evenodd;stroke:#f5f7fa;stroke-width:2.83461;stroke-dasharray:none;stroke-opacity:1" /></g></g><g
+     transform="translate(0,-2.9999602)"><path
+       d="M 124.3052,124.0166 V 93.6884 h 36.9581 v 30.3282 z"
+       style="fill:none;stroke:#39ff14;stroke-width:3.75;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" /><path
+       d="M 131.7815,130.3643 H 153.787"
+       style="fill:none;stroke:#39ff14;stroke-width:3.75;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" /><path
+       d="m 142.7843,124.0166 v 6.3477"
+       style="fill:none;stroke:#39ff14;stroke-width:3.75;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" /><path
+       d="M 96.3751,130.5054 V 76.7611 h 20.595 v 53.7443 z"
+       style="fill:none;stroke:#39ff14;stroke-width:3.75;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" /><path
+       d="m 99.9017,82.5446 h 13.5418"
+       style="fill:none;stroke:#39ff14;stroke-width:3.75;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" /><path
+       d="m 110.7634,104.6912 a 4.0908,4.0908 0 0 1 -4.0908,4.0907 4.0908,4.0908 0 1 1 4.0908,-4.0907 z"
+       style="fill:none;stroke:#39ff14;stroke-width:3.75;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" /><path
+       d="m 104.6977,124.0166 h 3.9497"
+       style="fill:none;stroke:#39ff14;stroke-width:3.75;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" /></g><path
+     d="M 82.6718,90.40024 H 33.9201 c -1.976,0 -3.5781,1.602 -3.5781,3.578 v 31.824 c 0,1.9761 1.6021,3.5781 3.5781,3.5781 l 48.7517,1e-4 c 1.9766,0 3.5781,-1.6021 3.5781,-3.5781 v -31.8241 c 0,-1.976 -1.6015,-3.578 -3.5781,-3.578 z m -24.3752,0.7528 c 0.528,0 0.9548,0.4274 0.9548,0.9554 0,0.528 -0.4274,0.9554 -0.9548,0.9554 -0.5274,0 -0.9554,-0.4274 -0.9554,-0.9554 0,-0.528 0.4274,-0.9554 0.9554,-0.9554 z m 1.7723,36.6744 h -3.5458 c -0.3001,0 -0.5436,-0.2435 -0.5436,-0.5436 0,-0.3 0.2435,-0.5436 0.5436,-0.5436 h 3.5458 c 0.2994,0 0.5435,0.2435 0.5435,0.5436 0,0.3 -0.2435,0.5436 -0.5435,0.5436 z m 22.4538,-2.1742 H 34.0692 v -31.5259 h 48.4535 z"
+     style="fill:#39ff14;fill-opacity:1;fill-rule:evenodd" /><g
+     transform="translate(0,1.4999801)"
+     style="stroke-width:1.00061662;stroke-dasharray:none"><g
+       style="fill:#39ff14;fill-opacity:1;stroke-width:1.00061662;stroke-dasharray:none"><path
+         d="m 88.8552,82.6382 c 0,0.5477 -0.4456,0.992 -0.9915,0.992 H 33.6934 c -0.5483,0 -0.9914,-0.4437 -0.9914,-0.992 l -0.827,-0.9225 c 0,-0.5483 0.4444,-0.9926 0.992,-0.9926 l 56.3182,0.1656 c 0.5477,0 0.9914,0.4438 0.9914,0.992 z"
+         style="fill:#39ff14;fill-opacity:1;fill-rule:evenodd;stroke-width:1.00061662;stroke-dasharray:none" /><path
+         d="m 53.0336,81.1378 2.0952,-1.9731 c 0,-0.1318 0.2835,-0.237 0.6311,-0.2376 l 8.0733,-0.0024 c 0.3482,0 0.6299,0.1058 0.6299,0.2369 l 2.0705,1.9454 23.0917,-0.1759 -8.1585,-7.4658 h -41.776 l -7.8007,7.9052 21.1779,-0.1614 c -0.0199,-0.0223 -0.0344,-0.0465 -0.0344,-0.0713 z m -8.17,-6.6345 h 31.8741 l 6.2253,3.5636 -44.052,0.2103 z"
+         style="fill:#39ff14;fill-opacity:1;fill-rule:evenodd;stroke-width:1.00061662;stroke-dasharray:none" /><path
+         d="M 80.4772,46.7731 H 40.681 c -0.5459,0 -0.9902,0.4437 -0.9902,0.992 V 73.4659 H 81.4674 V 47.7651 c 0,-0.5483 -0.4437,-0.992 -0.9902,-0.992 z m -19.6841,0.2466 c 0.2333,0 0.4213,0.1886 0.4213,0.4214 0,0.2333 -0.1886,0.4225 -0.4213,0.4225 -0.2327,0 -0.422,-0.1892 -0.422,-0.4225 0,-0.2322 0.1886,-0.4214 0.422,-0.4214 z M 79.8153,71.8132 H 41.3429 V 48.4258 h 38.4724 z"
+         style="fill:#39ff14;fill-opacity:1;fill-rule:evenodd;stroke-width:1.00061662;stroke-dasharray:none" /></g></g><path
+     d="m 139.8193,53.38418 c -1.2359,-0.1656 -4.3391,-0.1634 -4.3391,-0.1634 h -0.2172 c 0,0 -3.1061,-0.0022 -4.3403,0.1634 -2.1574,0.2935 -3.8067,0.259 -3.8067,4.4274 0,1.4107 0,22.5516 0,24.6378 0,2.0877 1.7579,3.4591 4.0737,3.4591 2.3157,0 4.0736,0 4.0736,0 h 0.2172 c 0,0 1.7579,0 4.0737,0 2.3143,0 4.0708,-1.3714 4.0708,-3.4591 0,-2.0862 0,-23.2271 0,-24.6378 -4e-4,-4.1681 -1.6453,-4.1339 -3.8057,-4.4274 z m -6.0941,0.879 h 3.1112 c 0.11,0 0.2008,0.0893 0.2008,0.2026 0,0.1086 -0.0908,0.2005 -0.2008,0.2005 h -3.1112 c -0.1115,0 -0.2023,-0.0919 -0.2023,-0.2005 3e-4,-0.1133 0.0912,-0.2026 0.2023,-0.2026 z m 3.4947,30.2561 c 0,0.1692 -0.1387,0.3105 -0.3091,0.3105 h -3.0759 c -0.1733,0 -0.312,-0.1416 -0.312,-0.3105 v -0.4424 c 0,-0.1693 0.1391,-0.3095 0.312,-0.3095 h 3.0759 c 0.1704,0 0.3091,0.1402 0.3091,0.3095 z m 5.1255,-2.967 h -14.0929 v -24.6697 h 14.0929 z"
+     style="fill:#39ff14;fill-opacity:1;fill-rule:evenodd" /></symbol>
+</svg>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">OmnibusCloud · Design</p>
+    <h1>Render Bridge — <span class="thin">панель аддона</span> Blender</h1>
+    <p class="lede">Редизайн перегруженной N-панели: чистый поток художника на 90% случаев и свёрнутая диагностика — на остальные 10%. Один экран, одно действие, лишнее раскрывается по необходимости.</p>
+    <div class="meta">
+      <span><b>Scope</b> Blender N-panel · OutWit.Render.BlenderAddon</span>
+      <span><b>Тема</b> аутентичная тёмная Blender</span>
+      <span><b>Стек</b> Python addon → C# bridge</span>
+      <span><b>2026</b></span>
+    </div>
+  </header>
+
+  <!-- ============ 01 — BEFORE / AFTER ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">01 /</span><h2>До и после</h2></div>
+    <p class="s-desc">Слева — текущее состояние: главный поток и диагностика смешаны, 12 секций, дублирующиеся данные и матрица политик прямо над кнопкой. Справа — предлагаемый дефолт: одна строка идентичности, одна панель Render, одно действие.</p>
+    <div class="board"><div class="stage">
+
+      <div class="col">
+        <div class="cap">Сейчас<small>поток и диагностика смешаны · 12 панелей</small></div>
+        <div class="np">
+          <div class="np-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>OmnibusCloud</div>
+          <div class="np-b">
+            <div class="note mut">Tiled still: Ready</div>
+            <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Ready</div>
+            <div class="line">User: dmitry@studio.com</div>
+            <div class="btnrow"><div class="btn">Refresh</div><div class="btn">Sign Out</div></div>
+            <div class="sub">
+              <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+              <div class="sub-b">
+                <div class="row"><div class="lbl">Render Mode</div><div class="fld"><span>Tiled Still</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+                <div class="note info"><svg class="ic"><use href="#i-info"/></svg>Recommended: Still<span class="mini">Use</span></div>
+                <div class="row"><div class="lbl">Target</div><div class="fld"><span>All clients</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+                <div class="row"><div class="lbl">Still Frame</div><div class="num">1</div></div>
+                <div class="row"><div class="lbl">Tiles X</div><div class="num">2</div></div>
+                <div class="row"><div class="lbl">Tiles Y</div><div class="num">2</div></div>
+                <div class="row"><div class="lbl">Tile Overlap</div><div class="num">8</div></div>
+                <div class="line">Blend: scene.blend<span class="flag">дубль</span></div>
+                <div class="box">
+                  <div class="line ok">Engine: Ready</div>
+                  <div class="line ok">Scene: Ready</div>
+                  <div class="line ok">Tiled still: Ready<span class="flag">матрица — шум</span></div>
+                </div>
+                <div class="btn pri"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+                <div class="btn">Check<span class="flag">≈ Render</span></div>
+              </div>
+            </div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Job</div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Results</div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-down"/></svg>Advanced Diagnostics</div>
+            <div class="coll in"><svg class="ic tri"><use href="#i-chev-right"/></svg>Connection</div>
+            <div class="coll in"><svg class="ic tri"><use href="#i-chev-right"/></svg>Execution Scope</div>
+            <div class="coll in"><svg class="ic tri"><use href="#i-chev-right"/></svg>Blend</div>
+            <div class="coll in"><svg class="ic tri"><use href="#i-chev-right"/></svg>Scene Diagnostics</div>
+            <div class="coll in"><svg class="ic tri"><use href="#i-chev-right"/></svg>Validation</div>
+            <div class="coll in"><svg class="ic tri"><use href="#i-chev-right"/></svg>Preflight</div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Last Error</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="cap">Предлагается · Ready<small>поток художника · одно действие</small></div>
+        <div class="np">
+          <div class="np-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>OmnibusCloud</div>
+          <div class="np-b">
+            <div class="id"><span class="mk"><svg class="oclogo" style="width:13px;height:13px" aria-hidden="true"><use href="#oc-logo"/></svg></span><div style="display:flex;flex-direction:column;"><span>OmnibusCloud</span><span class="accent"></span></div><span class="r">dmitry@studio · Sign Out</span></div>
+            <div class="sub">
+              <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+              <div class="sub-b">
+                <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+                <div class="row"><div class="lbl">Output</div><div class="seg"><div class="on">Image</div><div>Animation</div></div></div>
+                <div class="row"><div class="lbl">Frame</div><div class="num">1</div></div>
+                <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Ready to render</div>
+                <div class="btn pri"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+              </div>
+            </div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Advanced / Diagnostics</div>
+          </div>
+        </div>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ 02 — LIFECYCLE STATES ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">02 /</span><h2>Состояния панели</h2></div>
+    <p class="s-desc">Один и тот же блок Render проходит жизненный цикл, не выкидывая художника в другие панели: блокер с кнопкой-фиксом → прогресс с отменой → результат с скачиванием. Вся диагностика живёт в свёрнутом Advanced. Отмена асинхронна — после клика Cancel идёт транзитная фаза <code>Cancelling</code> (кнопка дизейблится, «finishing current task…»), затем <code>Cancelled</code>; фаза исполнения берётся из серверного статуса job, не из локальной догадки.</p>
+    <div class="board"><div class="stage">
+
+      <div class="col">
+        <div class="cap">Заблокировано → фикс<small>причина + действие</small></div>
+        <div class="sub">
+          <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+          <div class="sub-b">
+            <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+            <div class="row"><div class="lbl">Output</div><div class="seg"><div class="on">Image</div><div>Animation</div></div></div>
+            <div class="row"><div class="lbl">Frame</div><div class="num">1</div></div>
+            <div class="note warn"><svg class="ic"><use href="#i-warn"/></svg>Scene not saved</div>
+            <div class="btn fix"><svg class="ic"><use href="#i-save"/></svg>Save scene</div>
+            <div class="btn pri dim"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="cap">Идёт рендер<small>фазы + прогресс + Cancel</small></div>
+        <div class="sub">
+          <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+          <div class="sub-b">
+            <div class="dim-grp">
+              <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+              <div class="row"><div class="lbl">Output</div><div class="seg"><div class="on">Image</div><div>Animation</div></div></div>
+            </div>
+            <div class="note info"><svg class="ic"><use href="#i-loader"/></svg>Running · frame 34 / 120</div>
+            <div class="sm-lbl">Overall</div>
+            <div class="bar"><i style="width:78%"></i><span>78%</span></div>
+            <div class="sm-lbl">Computation</div>
+            <div class="bar"><i style="width:61%"></i><span>61%</span></div>
+            <div class="btn"><svg class="ic"><use href="#i-x"/></svg>Cancel</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="cap">Готово<small>результат + открыть / повторить</small></div>
+        <div class="sub">
+          <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+          <div class="sub-b">
+            <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Completed</div>
+            <div class="line"><svg class="ic" style="color:#9c9c9c"><use href="#i-photo"/></svg>render_0001.png</div>
+            <div class="btn pri"><svg class="ic"><use href="#i-download"/></svg>Download result</div>
+            <div class="btnrow"><div class="btn"><svg class="ic"><use href="#i-open"/></svg>Open</div><div class="btn"><svg class="ic"><use href="#i-folder"/></svg>Folder</div></div>
+            <div class="btn"><svg class="ic"><use href="#i-refresh"/></svg>Render again</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="cap">Advanced раскрыт<small>сюда уехала вся диагностика</small></div>
+        <div class="np">
+          <div class="np-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Advanced / Diagnostics</div>
+          <div class="np-b">
+            <div class="sub">
+              <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Connection</div>
+              <div class="sub-b">
+                <div class="line">Bridge: <span class="ok">Running</span></div>
+                <div class="line">Cloud: <span class="ok">Connected</span></div>
+                <div class="line mut">v0.4.1</div>
+              </div>
+            </div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Account &amp; scope</div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Scene &amp; dependencies</div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Manual steps</div>
+            <div class="coll"><svg class="ic tri"><use href="#i-chev-right"/></svg>Last error</div>
+          </div>
+        </div>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ 03 — OUTPUT · IMAGE ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">03 /</span><h2>Output · Image</h2></div>
+    <p class="s-desc">Ось «что рендерим» = <code>Image</code>. Tiled-режим не убран, а стал видимым модификатором: галка «split frame across machines» раскрывает контролы тайлов. 90% видят чистый кадр, тяжёлый кадр бьётся на машины одним кликом.</p>
+    <div class="board"><div class="stage">
+
+      <div class="col">
+        <div class="cap">Обычный кадр<small>одна машина · чисто</small></div>
+        <div class="sub">
+          <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+          <div class="sub-b">
+            <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+            <div class="row"><div class="lbl">Output</div><div class="seg"><div class="on">Image</div><div>Animation</div></div></div>
+            <div class="chk"><span class="box-sq"></span>Split frame across machines</div>
+            <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Ready to render</div>
+            <div class="btn pri"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="cap">Тяжёлый кадр<small>сплит на машины · тайлы раскрылись</small></div>
+        <div class="sub">
+          <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+          <div class="sub-b">
+            <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+            <div class="row"><div class="lbl">Output</div><div class="seg"><div class="on">Image</div><div>Animation</div></div></div>
+            <div class="chk"><span class="box-sq on"><svg class="ic"><use href="#i-check"/></svg></span>Split frame across machines</div>
+            <div class="tiles">
+              <div class="th"><svg class="ic"><use href="#i-tiles"/></svg>Tiles · auto from 10 machines</div>
+              <div class="row"><div class="lbl">Tiles X</div><div class="num">4</div></div>
+              <div class="row"><div class="lbl">Tiles Y</div><div class="num">3</div></div>
+              <div class="row"><div class="lbl">Overlap px</div><div class="num">8</div></div>
+            </div>
+            <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Ready · 12 tiles → 10 machines</div>
+            <div class="btn pri"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+          </div>
+        </div>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ 04 — OUTPUT · ANIMATION ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">04 /</span><h2>Output · Animation</h2></div>
+    <p class="s-desc">Ось = <code>Animation</code>: <code>Frame</code> превращается в диапазон <code>Frames</code>, появляется под-ось <code>Result: Sequence | Video</code>. Video раскрывает контейнер/кодек/fps и предупреждает, что энкод идёт после досчёта всех кадров — туда же ложится <code>preflight_video</code>.</p>
+    <div class="board"><div class="stage">
+
+      <div class="col">
+        <div class="cap">Animation · Sequence<small>секвенция изображений</small></div>
+        <div class="sub">
+          <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+          <div class="sub-b">
+            <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+            <div class="row"><div class="lbl">Output</div><div class="seg"><div>Image</div><div class="on">Animation</div></div></div>
+            <div class="row"><div class="lbl">Frames</div><div class="rng"><div class="num">1</div><span class="dash">–</span><div class="num">120</div></div></div>
+            <div class="row"><div class="lbl">Result</div><div class="seg"><div class="on">Sequence</div><div>Video</div></div></div>
+            <div class="row"><div class="lbl">Format</div><div class="fld"><span>PNG</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+            <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Ready · 120 frames → 10 machines</div>
+            <div class="btn pri"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="cap">Animation · Video<small>один файл · энкод в конце</small></div>
+        <div class="sub">
+          <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+          <div class="sub-b">
+            <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+            <div class="row"><div class="lbl">Output</div><div class="seg"><div>Image</div><div class="on">Animation</div></div></div>
+            <div class="row"><div class="lbl">Frames</div><div class="rng"><div class="num">1</div><span class="dash">–</span><div class="num">120</div></div></div>
+            <div class="row"><div class="lbl">Result</div><div class="seg"><div>Sequence</div><div class="on">Video</div></div></div>
+            <div class="vbox">
+              <div class="th"><svg class="ic"><use href="#i-video"/></svg>Video</div>
+              <div class="row"><div class="lbl">Container</div><div class="fld"><span>MP4</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+              <div class="row"><div class="lbl">Codec</div><div class="fld"><span>H.264</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+              <div class="row"><div class="lbl">FPS</div><div class="num">24</div></div>
+              <div class="note mut"><svg class="ic"><use href="#i-info"/></svg>Encodes after all 120 frames return</div>
+            </div>
+            <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Ready to render</div>
+            <div class="btn pri"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+          </div>
+        </div>
+      </div>
+
+    </div></div>
+  </section>
+
+  <!-- ============ 05 — IDENTITY ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">05 /</span><h2>Идентичность в панели</h2></div>
+    <p class="s-desc">Бренд присутствует сдержанно: компактная марка-облако, название и тонкий лаймовый акцент в одну строку. Solidity в дев-инструменте — это аккуратность, а не размер логотипа.</p>
+    <div class="board"><div class="stage">
+
+      <div class="col">
+        <div class="cap">Компактная идентичность<small>марка + название + аккаунт · одна строка</small></div>
+        <div class="np">
+          <div class="np-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>OmnibusCloud</div>
+          <div class="np-b">
+            <div class="id"><span class="mk"><svg class="oclogo" style="width:13px;height:13px" aria-hidden="true"><use href="#oc-logo"/></svg></span><div style="display:flex;flex-direction:column;"><span>OmnibusCloud</span><span class="accent"></span></div><span class="r">dmitry@studio · Sign Out</span></div>
+            <div class="sub">
+              <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Render</div>
+              <div class="sub-b">
+                <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+                <div class="row"><div class="lbl">Output</div><div class="seg"><div class="on">Image</div><div>Animation</div></div></div>
+                <div class="row"><div class="lbl">Frame</div><div class="num">1</div></div>
+                <div class="note ok"><svg class="ic"><use href="#i-check"/></svg>Ready to render</div>
+                <div class="btn pri"><svg class="ic"><use href="#i-photo"/></svg>Render</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <p class="note-strip"><b>Вертикальный баннер</b> — для карточки в Blender Extensions, страницы настроек и сайта; не для рабочей панели. <b>Lime</b> в UI — точечный акцент, не заливка.</p>
+    </div>
+  </section>
+
+  <!-- ============ 06 — PERSISTENCE / SETTINGS MEMORY ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">06 /</span><h2>Память настроек</h2></div>
+    <p class="s-desc">Последние значения рабочих привычек сохраняются <b>для пользователя этого компьютера</b>: settings аддона лежат в <code>%appdata%</code> (локальный профиль ОС; на macOS — <code>~/Library/Application&nbsp;Support</code>, на Linux — <code>~/.config</code>) — не в аккаунте и не в .blend. На другой машине — свой набор; на сервер ничего не синхронизируется. Логика — три корзины: <code>сохранять</code> личные преференции, <code>выводить</code> факты сцены из Blender, <code>сбрасывать</code> транзиент и проверки.</p>
+    <div class="board">
+
+      <div class="stage">
+        <div class="col" style="width:min(430px,100%);">
+          <div class="cap">Add-on Preferences<small>где живут сохранённые дефолты · %appdata%</small></div>
+          <div class="np">
+            <div class="np-h"><svg class="ic tri"><use href="#i-cloud"/></svg>OmnibusCloud Render Bridge</div>
+            <div class="np-b">
+              <div class="chk"><span class="box-sq on"><svg class="ic"><use href="#i-check"/></svg></span>Remember last render settings</div>
+              <div class="sub">
+                <div class="sub-h"><svg class="ic tri"><use href="#i-chev-down"/></svg>Defaults</div>
+                <div class="sub-b">
+                  <div class="chk"><span class="box-sq on"><svg class="ic"><use href="#i-check"/></svg></span>Split frame across machines</div>
+                  <div class="row"><div class="lbl">Tiles X / Y</div><div class="rng"><div class="num">4</div><span class="dash">×</span><div class="num">3</div></div></div>
+                  <div class="row"><div class="lbl">Tile Overlap px</div><div class="num">8</div></div>
+                  <div class="row"><div class="lbl">Target</div><div class="fld"><span>Studio GPUs</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+                  <div class="row"><div class="lbl">Animation result</div><div class="fld"><span>Video</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div>
+                  <div class="row"><div class="lbl">Video</div><div class="rng"><div class="fld"><span>MP4</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div><div class="fld"><span>H.264</span><span class="caret"><svg class="ic"><use href="#i-chev-down"/></svg></span></div></div></div>
+                </div>
+              </div>
+              <div class="line mut" style="margin-top:3px;">Stored in %appdata% · this computer's user · not synced</div>
+              <div class="btnrow" style="margin-top:1px;"><div class="btn"><svg class="ic"><use href="#i-refresh"/></svg>Reset to defaults</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ptable-wrap">
+        <table class="ptable">
+          <thead><tr><th>Контрол / поле</th><th>Сохр.</th><th>Источник / scope</th><th>Почему</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="4">Сохраняется — для пользователя компьютера (%appdata%), sticky на submit</td></tr>
+            <tr><td>Tiled on/off (split)</td><td><span class="yes">да</span></td><td><code>%appdata%</code></td><td>Личная привычка — другого источника нет</td></tr>
+            <tr><td>Tiles X / Y / Overlap</td><td><span class="yes">да</span></td><td><code>%appdata%</code></td><td>Конкретная разбивка — Blender её не знает</td></tr>
+            <tr><td>Target (группа клиентов)</td><td><span class="yes">да</span></td><td><code>%appdata%</code></td><td>+ фолбэк, если группы больше нет в сети</td></tr>
+            <tr><td>Result: Sequence / Video</td><td><span class="yes">да</span></td><td><code>%appdata%</code></td><td>Предпочитаемая выдача анимации</td></tr>
+            <tr><td>Video: container / codec</td><td><span class="yes">да*</span></td><td><code>%appdata%</code></td><td>*если не взято из Output Properties</td></tr>
+
+            <tr class="grp"><td colspan="4">Не хранится — берётся живьём из сцены / Blender (единый источник правды)</td></tr>
+            <tr><td>Frame / диапазон кадров</td><td><span class="no">нет</span></td><td><code>scene.frame_*</code></td><td>Blender хранит это в .blend</td></tr>
+            <tr><td>Разрешение, формат (PNG / EXR)</td><td><span class="no">нет</span></td><td>Output Properties</td><td>Иначе два источника правды → дрейф</td></tr>
+            <tr><td>FPS</td><td><span class="no">нет</span></td><td><code>scene.render.fps</code></td><td>Иначе видео кодируется не на том fps</td></tr>
+            <tr><td>Output: Image / Animation</td><td><span class="no">авто</span></td><td>из диапазона</td><td>Диктуется сценой; конфликт ловит блокер</td></tr>
+
+            <tr class="grp"><td colspan="4">Всегда сбрасывается — транзиент и верификация (устаревшее = опасно)</td></tr>
+            <tr><td>Фаза, статус джоба, прогресс</td><td><span class="no">нет</span></td><td>runtime</td><td>Транзиентное состояние выполнения</td></tr>
+            <tr><td>Результат, состояние скачивания</td><td><span class="no">нет</span></td><td>runtime</td><td>Живёт только в рамках джоба</td></tr>
+            <tr><td><code>validate_*</code> / <code>preflight_*</code></td><td><span class="no">нет</span></td><td>пересчёт</td><td>Запомненное «Ready» — прямая опасность</td></tr>
+            <tr><td>Scene saved / dirty, upload status</td><td><span class="no">нет</span></td><td>текущее</td><td>Это состояние, а не настройка</td></tr>
+            <tr><td>Last error</td><td><span class="no">нет</span></td><td>runtime</td><td>Не должно переживать сессию</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="note-strip"><b>Механика:</b> хранилище — на <b>бридже</b> через <code style="font-family:var(--mono)">OutWit.Common.Settings.UseJson()</code> (канонический паттерн экосистемы; путь — per-OS-user <b>%appdata%</b> / <b>~/.config</b>; concurrency-safe). Аддон тонкий: читает/пишет через REST бриджа, bpy-props — транзитный UI-binding. Sticky-запись на submit под мастер-тогглом; кадр / формат / fps читаются из <b>scene</b> напрямую.</p>
+    </div>
+  </section>
+
+  <!-- ============ 07 — BRIDGE CONNECTION & AUTH ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">07 /</span><h2>Связь и вход (bridge)</h2></div>
+    <p class="s-desc">Аддон (Python) общается с OmnibusCloud (.NET) через локальный <b>бридж</b>. Связь поднимается и лечится автоматически; ручной <code>Reconnect</code> — контекстный, как блокеры. Вход — гейт перед Ready: <code>connecting → (bridge down · not found) → signed out → signed in → Ready</code>.</p>
+    <div class="board">
+      <div class="stage">
+
+        <div class="col" style="width:206px;">
+          <div class="cap">Старт Blender<small>бридж поднимается</small></div>
+          <div class="np">
+            <div class="np-h"><svg class="ic tri"><use href="#i-cloud"/></svg>OmnibusCloud</div>
+            <div class="np-b">
+              <div class="note info"><svg class="ic"><use href="#i-loader"/></svg>Connecting to bridge…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col" style="width:206px;">
+          <div class="cap">Связь упала<small>авто-ретрай → ручной</small></div>
+          <div class="np">
+            <div class="np-h"><svg class="ic tri"><use href="#i-cloud"/></svg>OmnibusCloud</div>
+            <div class="np-b">
+              <div class="note warn"><svg class="ic"><use href="#i-warn"/></svg>Bridge not responding</div>
+              <div class="btn fix"><svg class="ic"><use href="#i-refresh"/></svg>Reconnect</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col" style="width:206px;">
+          <div class="cap">Бридж не установлен<small>релонч не поможет</small></div>
+          <div class="np">
+            <div class="np-h"><svg class="ic tri"><use href="#i-cloud"/></svg>OmnibusCloud</div>
+            <div class="np-b">
+              <div class="note warn"><svg class="ic"><use href="#i-warn"/></svg>Bridge not found</div>
+              <div class="btnrow"><div class="btn fix"><svg class="ic"><use href="#i-folder"/></svg>Locate</div><div class="btn"><svg class="ic"><use href="#i-download"/></svg>Install</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col" style="width:206px;">
+          <div class="cap">Вход не выполнен<small>тут уместен бренд</small></div>
+          <div class="np">
+            <div class="np-h"><svg class="ic tri"><use href="#i-cloud"/></svg>OmnibusCloud</div>
+            <div class="np-b" style="padding:16px 12px;gap:11px;align-items:center;">
+              <svg class="oclogo" style="width:48px;height:48px;" aria-hidden="true"><use href="#oc-logo"/></svg>
+              <div class="wordmark">OmnibusCloud</div>
+              <div class="note mut" style="justify-content:center;">Not signed in</div>
+              <div class="btn pri" style="width:100%;"><svg class="ic"><use href="#i-login"/></svg>Login</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col" style="width:206px;">
+          <div class="cap">Вход выполнен<small>Logout в строке идентичности</small></div>
+          <div class="np">
+            <div class="np-h"><svg class="ic tri"><use href="#i-cloud"/></svg>OmnibusCloud</div>
+            <div class="np-b">
+              <div class="id"><span class="mk"><svg class="oclogo" style="width:13px;height:13px" aria-hidden="true"><use href="#oc-logo"/></svg></span>OmnibusCloud<span class="r" style="display:flex;align-items:center;gap:7px;">dmitry@studio<span class="btn" style="padding:2px 9px;"><svg class="ic"><use href="#i-logout"/></svg>Logout</span></span></div>
+              <div class="note mut" style="margin-top:2px;"><svg class="ic"><use href="#i-arrow-down"/></svg>далее — поток Render</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <p class="note-strip"><b>Lifecycle:</b> бридж стартует <b>lazy — при первом показе N-панели</b> (PID Blender передаётся бриджу), не на <code>register()</code>; гаснет через <b>watchdog по parent-PID</b> в самом бридже — при выходе, kill и краше; Windows Job Object / Linux PR_SET_PDEATHSIG — доп. гарантия ОС. Нормальный выход — graceful-shutdown; один инстанс на Blender; смерть бриджа в сессии → авто-релонч; idle-shutdown после долгой невидимости панели. <b>Refresh не нужен</b> — хартбит делает <code>tag_redraw</code> при смене фазы; ручной <code>Reconnect</code> — только контекстно в блокере.</p>
+    </div>
+  </section>
+
+  <!-- ============ PRINCIPLES ============ -->
+  <section class="section">
+    <div class="s-head"><span class="s-idx">08 /</span><h2>Принципы редизайна</h2></div>
+    <div class="s-desc" style="margin-bottom:18px;">Что держит всю систему вместе.</div>
+    <div class="principles">
+      <div class="pr"><h3><i>A</i>Две поверхности</h3><p>Поток художника (90%) и диагностика (10%, свёрнута) — физически разные секции.</p></div>
+      <div class="pr"><h3><i>B</i>Одно действие</h3><p><code>Render</code> сам делает upload → validate → preflight → submit. Ручные шаги — в Advanced.</p></div>
+      <div class="pr"><h3><i>C</i>Одна строка статуса</h3><p>Один статус и один блокер. У блокера всегда кнопка-фикс: <code>Save scene</code>, <code>Switch to Animation</code>, <code>Switch format</code>.</p></div>
+      <div class="pr"><h3><i>D</i>Прогрессивное раскрытие</h3><p>Tiled (split) и Video раскрывают свои параметры только когда выбраны. Дефолт — минимум строк.</p></div>
+      <div class="pr"><h3><i>E</i>Фазовая модель</h3><p>Состояние = явная фаза (<code>Ready → Running → Completed</code>), а не россыпь булевых флагов.</p></div>
+      <div class="pr"><h3><i>F</i>Бренд как акцент</h3><p>Lime — точечно, идентичность — в одну строку. Никакого баннера-постера в рабочем UI.</p></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div class="map"><b>Карта режимов:</b> Still = Image · одна машина &nbsp;·&nbsp; Tiled Still = Image · split &nbsp;·&nbsp; Frames = Animation · sequence &nbsp;·&nbsp; Video = Animation · video</div>
+    <div style="margin-top:8px;"><b>Решено (ревью 2026-06-09):</b> авто-выбор Output из сцены — да, конфликт ловит блокер &nbsp;·&nbsp; порядок — фундамент-первым (стейт-машина → панель) &nbsp;·&nbsp; настройки — на бридже через <code style="font-family:var(--mono)">OutWit.Common.Settings.UseJson()</code> &nbsp;·&nbsp; старт бриджа — lazy на первый показ панели, без кнопки Refresh (хартбит делает tag_redraw) &nbsp;·&nbsp; фаза <code style="font-family:var(--mono)">Cancelling</code> добавлена (отмена асинхронна). Детали — в plan.md.</div>
+  </footer>
+
+</div>
+</body>
+</html>
