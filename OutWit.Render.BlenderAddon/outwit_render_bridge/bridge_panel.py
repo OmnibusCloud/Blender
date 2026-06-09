@@ -332,6 +332,9 @@ def _draw_output(layout, context, state, view) -> None:
 
     if state.output_axis == "Image":
         layout.prop(state, "still_frame", text="Frame")
+        # Format mirrors the scene's Output Properties for convenience and writes straight back to the
+        # scene (saved in the .blend); the render reads it live at launch, so no re-upload is needed.
+        layout.prop(scene.render.image_settings, "file_format", text="Format")
         layout.prop(state, "split_frame")
         if state.split_frame:
             tiles = layout.box()
@@ -348,8 +351,8 @@ def _draw_output(layout, context, state, view) -> None:
 
     layout.prop(state, "anim_result", expand=True)
     if state.anim_result == "Sequence":
-        image_format = getattr(scene.render.image_settings, "file_format", "") or "—"
-        layout.label(text=f"Format: {image_format} (Output Properties)")
+        # Editable mirror of the scene's output format (writes to the .blend; read live at launch).
+        layout.prop(scene.render.image_settings, "file_format", text="Format")
     else:
         video = layout.box()
         video.prop(state, "video_frame_rate", text="FPS")
@@ -358,8 +361,9 @@ def _draw_output(layout, context, state, view) -> None:
 
 
 def _draw_render_setup(layout, context, state, view) -> None:
-    # Target — only when there is more than one choice to make.
-    if state.is_signed_in and target_option_count(state) > 1:
+    # Target — always offered while signed in: picking the render group is the core crowd-compute flow,
+    # so the control stays visible even with a single option (it still reassures where the job runs).
+    if state.is_signed_in:
         layout.prop(state, "selected_client_group")
 
     _draw_output(layout, context, state, view)
@@ -500,7 +504,9 @@ class OUTWIT_PT_bridge_advanced_panel(Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "OmnibusCloud"
-    bl_parent_id = "OUTWIT_PT_bridge_panel"
+    # Top-level panel (no bl_parent_id) so it reads as a fully separate collapsible block in the
+    # sidebar, like Blender's own Active Tool / Options / Workspace panels — not nested under Render.
+    bl_order = 10
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
