@@ -22,6 +22,17 @@
 
 ---
 
+## Прогресс реализации (обновлять по ходу)
+
+**Phase 1 — частично, в проде как addon `0.5.0` (commit 87fee19 / tag `addon-v0.5.0`):**
+- ✅ `bridge_status.py` — `compute_status(scene, state) -> StatusView` + `Phase` (incl `Cancelling`) + типизированные `Blocker`; сконсолидированы все policy- и summary-хелперы. Headless-тесты `tests/test_bridge_status.py` (19, `python -m unittest`, без Blender).
+- ✅ Основной поток подключён: Render-панель рисует статус/блокер/gate из `compute_status` (новый `_draw_status`); матрица `_draw_policy_box` **убрана из UI**; gate = `view.is_ready`. Cancel-оператор ставит `active_job_cancel_requested` → фаза `Cancelling` (сброс на new-job/Reset). Установлено и подтверждено пользователем («в целом работает»).
+- ⏳ Остаток Phase 1 (войдёт в реструктур Phase 2): root-панель + диагностические панели ещё на старых хелперах (`_compact_status_label`/`_primary_finding`/`_validation_policy`/…); схлопывание god-object `bridge_state` (derived `preflight_*`/`validate_*`); удаление мёртвых `_can_start_render`/`_draw_policy_box`.
+
+**Phase 2–7 — не начаты.** Следующий заход (новая сессия): **Phase 2 — панель 12→3+Advanced** (он же убирает остаток Phase 1). Стартовать с чтения текущего `bridge_panel.py` (12 Panel-классов) + этого плана.
+
+---
+
 ## Порядок работ (рекомендация)
 
 **Фундамент → структура → фичи.** Phase 1 (фазовая модель + единый модуль статуса) — это backbone, на котором сидят IA панели, блокеры и состояния связи. Делать косметику панели первой и прикручивать стейт-машину потом — значит строить панель против старых разрозненных булевых флагов и затем переделывать. Чисто-косметические правки можно вытащить раньше ради быстрого результата, но это даст переделку — **не рекомендую**.
