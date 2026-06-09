@@ -311,6 +311,10 @@ def _draw_connection_gate(layout, state, view) -> None:
         # Sign-in runs through the bridge's OIDC flow; it does NOT need the cloud-connected flag (which
         # is normally false until a session exists). Reaching SIGNED_OUT already implies the bridge runs.
         login.operator("outwit.bridge_sign_in", text="Login", icon="URL")
+        # begin_sign_in only STARTS the browser flow and returns; the session lands later. Until Phase 3's
+        # heartbeat polls it, nothing flips is_signed_in on its own — give an in-place refresh so the user
+        # isn't stranded on "Not signed in" after completing sign-in in the browser.
+        box.operator("outwit.bridge_refresh_status", text="I've signed in — refresh", icon="FILE_REFRESH")
         return
 
     line = layout.row()
