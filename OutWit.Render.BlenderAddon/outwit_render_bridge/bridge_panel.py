@@ -13,6 +13,7 @@ from .bridge_engine_routing import (
     render_mode_matches_recommendation,
     scene_frame_count,
 )
+from .bridge_status import Phase, compute_status
 
 
 def _get_runtime_state(context):
@@ -418,6 +419,19 @@ def _draw_policy_box(layout, state) -> None:
         box.label(text=finding, icon=_finding_icon(_primary_finding_policy(state)))
 
 
+def _draw_status(layout, view) -> None:
+    """One status line + (at most) one actionable blocker — the single-source replacement for the
+    Engine/Scene/Mode policy matrix. Reads bridge_status.compute_status, so the panel and the
+    operators always agree on status/blocker/readiness."""
+    row = layout.row()
+    row.alert = view.phase == Phase.BLOCKED
+    row.label(text=view.status_line, icon=view.status_icon)
+
+    blocker = view.blocker
+    if blocker is not None and blocker.has_fix:
+        layout.row().operator(blocker.fix_operator, text=blocker.fix_label, icon="ERROR")
+
+
 class OUTWIT_PT_bridge_panel(Panel):
     bl_label = "OmnibusCloud"
     bl_idname = "OUTWIT_PT_bridge_panel"
@@ -679,11 +693,14 @@ class OUTWIT_PT_bridge_launch_panel(Panel):
         if state.current_blend_is_dirty:
             layout.label(text="Save the scene before launching a cloud render.")
 
-        _draw_policy_box(layout, state)
+        # Single status line + one actionable blocker, from the single-source compute_status (replaces
+        # the Engine/Scene/Mode policy matrix). Same source drives the Render-button gate below.
+        view = compute_status(scene, state)
+        _draw_status(layout, view)
 
         # Primary action: one big Render button on its own row (upload -> validate -> preflight -> submit);
         # the preflight-only Check sits on a separate row below it.
-        launch_enabled = _can_start_render(state) and not state.current_blend_is_dirty
+        launch_enabled = view.is_ready and not state.current_blend_is_dirty
         render_row = layout.row()
         render_row.enabled = launch_enabled
         render_row.scale_y = 1.6

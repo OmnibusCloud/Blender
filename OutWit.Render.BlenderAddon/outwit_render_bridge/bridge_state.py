@@ -156,6 +156,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     active_job_result_blob_id: StringProperty(name="Active Job Result Blob Id", default="")
     active_job_result_blob_count: IntProperty(name="Active Job Result Blob Count", default=0)
     active_job_is_completed: BoolProperty(name="Active Job Is Completed", default=False)
+    active_job_cancel_requested: BoolProperty(name="Active Job Cancel Requested", default=False)
     auto_refresh_active_job: BoolProperty(name="Auto Refresh Active Job", default=False)
     auto_refresh_interval_seconds: IntProperty(name="Auto Refresh Interval Seconds", default=5, min=1, max=60)
     download_status: StringProperty(name="Download Status", default="")

@@ -611,6 +611,7 @@ def _apply_job_response(state, response, script_name: str) -> None:
     state.active_job_result_blob_id = ""
     state.active_job_result_blob_count = 0
     state.active_job_is_completed = False
+    state.active_job_cancel_requested = False
     state.auto_refresh_active_job = True
     state.download_status = ""
     state.download_message = ""
@@ -1400,8 +1401,10 @@ class OUTWIT_OT_bridge_cancel_job(Operator):
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
 
-        # Leave the background monitor running: it observes the Cancelled terminal status, snaps the
-        # bar and stops itself (then the panel offers Reset).
+        # Optimistic transitional state: cancel is asynchronous (server signals nodes, the current task
+        # still finishes). compute_status reads this to show the Cancelling phase until the server reports
+        # a terminal status; the background monitor then observes Cancelled, snaps the bar and stops.
+        state.active_job_cancel_requested = True
         state.status_message = "Cancellation requested."
         self.report({"INFO"}, "Cancellation requested.")
         _tag_job_areas_redraw()
@@ -1429,6 +1432,7 @@ class OUTWIT_OT_bridge_reset_job(Operator):
         state.active_job_result_blob_id = ""
         state.active_job_result_blob_count = 0
         state.active_job_is_completed = False
+        state.active_job_cancel_requested = False
 
         state.download_status = ""
         state.download_message = ""
