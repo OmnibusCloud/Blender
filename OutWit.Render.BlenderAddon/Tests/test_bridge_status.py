@@ -119,9 +119,17 @@ class ComputeStatusTests(unittest.TestCase):
             bridge_is_running=False, bridge_executable_path="/no/such/bridge.exe"))
         self.assertEqual(view.phase, status.Phase.BRIDGE_MISSING)
 
-    def test_running_but_not_connected_is_cloud_unreachable(self):
+    def test_signed_in_but_not_connected_is_cloud_unreachable(self):
+        # Cloud-unreachable is only a phase AFTER sign-in (post-auth connectivity loss).
         view = status.compute_status(make_scene(), make_state(is_connected_to_cloud=False))
         self.assertEqual(view.phase, status.Phase.CLOUD_UNREACHABLE)
+
+    def test_signed_out_takes_precedence_over_cloud_offline(self):
+        # A freshly started bridge reports cloud offline until signed in; the artist must still reach the
+        # Login CTA. Regression: gating cloud-before-auth dead-ended at 'Cloud unreachable / Reconnect'.
+        view = status.compute_status(make_scene(), make_state(is_signed_in=False, is_connected_to_cloud=False))
+        self.assertEqual(view.phase, status.Phase.SIGNED_OUT)
+        self.assertEqual(view.blocker.kind, status.BlockerKind.SIGN_IN)
 
     def test_connected_not_signed_in_is_signed_out_with_signin_blocker(self):
         view = status.compute_status(make_scene(), make_state(is_signed_in=False))

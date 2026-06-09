@@ -329,10 +329,15 @@ def _connection_phase(state) -> Phase:
             return Phase.BRIDGE_MISSING
         # Phase 3 refines this to CONNECTING while a launch/connect is in flight.
         return Phase.DISCONNECTED
-    if not getattr(state, "is_connected_to_cloud", False):
-        return Phase.CLOUD_UNREACHABLE
+    # Sign-in is the gate, NOT the bridge's cloud flag. A freshly started bridge legitimately reports
+    # cloud "offline" until an authenticated session exists (the addon even treats "signed in with scope"
+    # as the cloud-connected signal), so the artist must be able to reach the Login CTA from that state.
+    # Cloud-unreachable only matters AFTER sign-in (e.g. the session/scope fetch fails) — a real
+    # post-auth connectivity problem, not the normal pre-sign-in state.
     if not getattr(state, "is_signed_in", False):
         return Phase.SIGNED_OUT
+    if not getattr(state, "is_connected_to_cloud", False):
+        return Phase.CLOUD_UNREACHABLE
     return Phase.READY
 
 
