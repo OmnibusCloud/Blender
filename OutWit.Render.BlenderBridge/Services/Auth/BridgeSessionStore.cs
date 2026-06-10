@@ -1,3 +1,5 @@
+using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OutWit.Common.DependencyInjection;
@@ -8,7 +10,12 @@ using OutWit.Render.BlenderBridge.Services.Auth.Interfaces;
 namespace OutWit.Render.BlenderBridge.Services.Auth
 {
     /// <summary>
-    /// File-backed fallback bridge session store.
+    /// File-backed fallback bridge session store. The persisted session holds the OIDC refresh token,
+    /// so on Windows it is encrypted at rest with DPAPI (CurrentUser scope — only the same OS user can
+    /// read it back). On macOS/Linux the payload is written unprotected for now (a real Keychain /
+    /// Secret Service backend is the remaining work — see docs/refresh-token-storage.md); an envelope
+    /// flag records which, so a DPAPI file fails closed (returns null → re-login) on any other platform
+    /// rather than being mis-read.
     /// </summary>
     [InjectableHost]
     public partial class BridgeSessionStore : IBridgeSessionStore
@@ -21,8 +28,35 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
             if (!File.Exists(path))
                 return null;
 
-            await using var stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<BridgeStoredSession>(stream, cancellationToken: cancellationToken);
+            try
+            {
+                var envelopeBytes = await File.ReadAllBytesAsync(path, cancellationToken);
+                var envelope = JsonSerializer.Deserialize<SessionEnvelope>(envelopeBytes);
+                if (envelope?.Payload == null)
+                    return null;
+
+                var payload = Convert.FromBase64String(envelope.Payload);
+
+                if (envelope.Protected)
+                {
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        Logger.LogWarning("Bridge session is DPAPI-protected but cannot be decrypted on this platform; requiring re-login.");
+                        return null;
+                    }
+
+                    payload = Unprotect(payload);
+                }
+
+                return JsonSerializer.Deserialize<BridgeStoredSession>(payload);
+            }
+            catch (Exception ex)
+            {
+                // Corrupt / foreign / undecryptable session → treat as no session (clean re-login)
+                // rather than crashing the bridge.
+                Logger.LogWarning(ex, "Failed to load persisted bridge session; requiring re-login.");
+                return null;
+            }
         }
 
         public async Task SaveAsync(BridgeStoredSession session, CancellationToken cancellationToken = default)
@@ -30,9 +64,25 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
             var path = GetSessionFilePath();
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-            await using var stream = File.Create(path);
-            await JsonSerializer.SerializeAsync(stream, session, cancellationToken: cancellationToken);
-            Logger.LogInformation("Bridge session persisted to local fallback storage.");
+            var json = JsonSerializer.SerializeToUtf8Bytes(session);
+
+            var isProtected = false;
+            if (OperatingSystem.IsWindows())
+            {
+                json = Protect(json);
+                isProtected = true;
+            }
+
+            var envelope = new SessionEnvelope
+            {
+                Protected = isProtected,
+                Payload = Convert.ToBase64String(json)
+            };
+
+            await File.WriteAllBytesAsync(path, JsonSerializer.SerializeToUtf8Bytes(envelope), cancellationToken);
+            Logger.LogInformation(
+                "Bridge session persisted to local fallback storage (encrypted at rest: {Encrypted}).",
+                isProtected);
         }
 
         public Task ClearAsync(CancellationToken cancellationToken = default)
@@ -49,6 +99,14 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
 
         #region Tools
 
+        [SupportedOSPlatform("windows")]
+        private static byte[] Protect(byte[] data)
+            => ProtectedData.Protect(data, optionalEntropy: null, DataProtectionScope.CurrentUser);
+
+        [SupportedOSPlatform("windows")]
+        private static byte[] Unprotect(byte[] data)
+            => ProtectedData.Unprotect(data, optionalEntropy: null, DataProtectionScope.CurrentUser);
+
         private string GetSessionFilePath()
         {
             var configured = Settings.SessionStoragePath;
@@ -56,6 +114,17 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
                 return Path.Combine(configured, "bridge-session.json");
 
             return Path.Combine(AppContext.BaseDirectory, configured, "bridge-session.json");
+        }
+
+        #endregion
+
+        #region Models
+
+        private sealed class SessionEnvelope
+        {
+            public bool Protected { get; set; }
+
+            public string? Payload { get; set; }
         }
 
         #endregion

@@ -31,8 +31,11 @@ namespace OutWit.Render.BlenderBridge
 
             var settingsSection = builder.Configuration.GetSection("Bridge");
             var startupSecretModeText = settingsSection["StartupSecretMode"];
+            // Secure by default: a missing/unparseable setting enables the per-process local secret
+            // rather than leaving the loopback REST surface open. The addon already reads the secret
+            // from the connection-context file and sends it as a bearer (bridge_client._apply_secret).
             if (!Enum.TryParse(startupSecretModeText, ignoreCase: true, out BridgeStartupSecretMode startupSecretMode))
-                startupSecretMode = BridgeStartupSecretMode.Disabled;
+                startupSecretMode = BridgeStartupSecretMode.GeneratedPerProcess;
 
             var settings = new BridgeSettings
             {

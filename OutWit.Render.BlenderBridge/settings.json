@@ -5,7 +5,7 @@
     "LocalRestUrl": "http://127.0.0.1:17777/bridge/",
     "SessionStoragePath": "BridgeSession",
     "DownloadCachePath": "BridgeCache",
-    "StartupSecretMode": "Disabled",
+    "StartupSecretMode": "GeneratedPerProcess",
     "LeaseHeartbeatIntervalSeconds": 5,
     "LeaseTimeoutSeconds": 30,
     "OrphanGracePeriodSeconds": 600,
