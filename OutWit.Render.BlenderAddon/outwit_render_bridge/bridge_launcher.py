@@ -29,8 +29,32 @@ def is_process_running(process_id: int) -> bool:
     if process_id <= 0:
         return False
 
+    if os.name == "nt":
+        # NEVER use os.kill(pid, 0) here: on Windows, os.kill calls TerminateProcess for any
+        # signal other than CTRL_C/CTRL_BREAK — a "liveness check" that KILLS the bridge.
+        # Query the process handle instead (stdlib only: Blender's Python has no psutil).
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, process_id)
+        if not handle:
+            return False
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
     try:
         os.kill(process_id, 0)
+        return True
+    except PermissionError:
+        # The process exists but belongs to another user — alive.
         return True
     except OSError:
         return False
