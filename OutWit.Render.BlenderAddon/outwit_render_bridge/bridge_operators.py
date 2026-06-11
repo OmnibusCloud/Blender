@@ -34,6 +34,13 @@ from .bridge_launcher import (
     spawn_bridge_process,
     stop_bridge,
 )
+from .bridge_render_settings import (
+    compose_remember_payload,
+    compose_sticky_payload,
+    group_name_for,
+    resolve_target_seed,
+    seed_prop_values,
+)
 from .bridge_scene_attachments import collect_scene_attachment_metadata, summarize_scene_attachment_metadata
 from .bridge_scene_packaging import create_packed_upload_copy, ScenePackagingError
 from .bridge_state import ALL_CLIENTS_GROUP_ID, NO_GROUP_ID, apply_render_mode_to_axes
@@ -789,6 +796,17 @@ def _auto_refresh_job_timer() -> float:
 _lazy_launch_call: AsyncCall | None = None
 _lazy_launch_failed = False
 
+# Phase 5 persisted render preferences — session latches. The bridge OWNS the storage; we seed the
+# transient props once per Blender session when the bridge becomes reachable (_pump_render_settings),
+# seed the remembered TARGET once when the execution scope is known (_refresh_bridge_state), and
+# sticky-write the used values after a successful submit. _applying_settings_seed suppresses the
+# prefs-toggle update callback while the seed itself writes the toggle (echo guard);
+# _remember_push_pending keeps a toggle flip alive until the bridge is reachable again.
+_render_settings_seeded = False
+_render_settings_target_seeded = False
+_remember_push_pending = False
+_applying_settings_seed = False
+
 # Last connection-relevant state shown in the panel. The heartbeat timer changes this state off the
 # draw cycle, but Blender does not repaint the N-panel until a UI event (the "stuck on Connecting…
 # until you hover" symptom). When the signature changes we tag the 3D areas for redraw so the panel
@@ -875,6 +893,134 @@ def _pump_lazy_first_start(context) -> None:
     ).start()
 
 
+def _get_addon_preferences(context):
+    try:
+        return context.preferences.addons[__package__].preferences
+    except Exception:
+        return None
+
+
+def _remember_render_settings_enabled(context) -> bool:
+    return bool(getattr(_get_addon_preferences(context), "remember_render_settings", True))
+
+
+def _apply_render_settings_seed(context, settings) -> None:
+    """Write the persisted preferences into the transient UI props (main thread). The master flag
+    lands on the addon preferences toggle under the echo guard so its update callback does not
+    push the value straight back to the bridge."""
+    global _applying_settings_seed
+    state = _get_runtime_state(context)
+    _applying_settings_seed = True
+    try:
+        prefs = _get_addon_preferences(context)
+        if prefs is not None:
+            prefs.remember_render_settings = settings.remember_render_settings
+        for prop, value in seed_prop_values(settings).items():
+            setattr(state, prop, value)
+    finally:
+        _applying_settings_seed = False
+
+
+def _pump_render_settings(context) -> None:
+    """Seed the UI from the bridge's persisted render preferences (once per Blender session) and
+    retry a pending master-toggle push. Quiet best-effort off the heartbeat: the bridge REST may
+    still be warming up — we simply try again next tick."""
+    global _render_settings_seeded
+    state = _get_runtime_state(context)
+    if not state.bridge_is_running or not state.bridge_lease_acquired:
+        return
+
+    if not _render_settings_seeded:
+        try:
+            settings = _get_bridge_client(context).get_render_settings()
+        except Exception:
+            return
+        _apply_render_settings_seed(context, settings)
+        _render_settings_seeded = True
+        return
+
+    if _remember_push_pending:
+        try:
+            _push_remember_render_settings(context)
+        except Exception:
+            pass
+
+
+def _push_remember_render_settings(context) -> None:
+    """Persist the master toggle: read-modify-write so only the flag changes on the bridge."""
+    global _remember_push_pending
+    client = _get_bridge_client(context)
+    current = client.get_render_settings()
+    client.set_render_settings(
+        compose_remember_payload(current, _remember_render_settings_enabled(context)))
+    _remember_push_pending = False
+
+
+def on_remember_render_settings_changed(context) -> None:
+    """Update-callback target for the preferences master toggle (a transient binding — the bridge
+    owns the value). Push now when reachable; otherwise leave it pending for the heartbeat pump."""
+    global _remember_push_pending
+    if _applying_settings_seed:
+        return
+    _remember_push_pending = True
+    try:
+        _push_remember_render_settings(context)
+    except Exception:
+        pass
+
+
+def _seed_remembered_target(context, client) -> None:
+    """Restore the remembered render target once the execution scope (groups) is known — the group
+    dropdown can only be set to ids that exist in the freshly written groups_json. One attempt per
+    Blender session; a vanished group simply leaves the default selection (the agreed fallback)."""
+    global _render_settings_target_seeded
+    state = _get_runtime_state(context)
+    if _render_settings_target_seeded:
+        return
+    _render_settings_target_seeded = True
+
+    try:
+        settings = client.get_render_settings()
+        groups = json.loads(state.groups_json) if state.groups_json else []
+        target = resolve_target_seed(settings, groups, state.can_run_on_all_clients)
+    except Exception:
+        return
+
+    if target is None:
+        return
+
+    group_id, run_on_all = target
+    state.run_on_all_nodes = run_on_all
+    if group_id:
+        state.selected_client_group = group_id
+
+
+def _sticky_render_settings_after_submit(context) -> None:
+    """Persist the values the submit actually used (under the master toggle). Best-effort: a
+    settings-persistence failure must never fail a successful launch."""
+    try:
+        if not _remember_render_settings_enabled(context):
+            return
+        state = _get_runtime_state(context)
+        client = _get_bridge_client(context)
+        current = client.get_render_settings()
+        group_id = _get_selected_client_group_id(state)
+        groups = json.loads(state.groups_json) if state.groups_json else []
+        client.set_render_settings(compose_sticky_payload(
+            current,
+            remember=True,
+            split_frame=state.split_frame,
+            tiles_x=int(state.tiles_x),
+            tiles_y=int(state.tiles_y),
+            tile_overlap=int(state.tile_overlap_px),
+            anim_result=state.anim_result,
+            group_id=group_id,
+            group_name=group_name_for(groups, group_id),
+        ))
+    except Exception:
+        pass
+
+
 def _bridge_lease_timer() -> float:
     context = getattr(bpy, "context", None)
     window_manager = getattr(context, "window_manager", None)
@@ -884,6 +1030,7 @@ def _bridge_lease_timer() -> float:
 
     refresh_bridge_process_state(context)
     _pump_lazy_first_start(context)
+    _pump_render_settings(context)
     # Repaint the panel when the connection phase changes (heartbeat-driven; replaces manual Refresh).
     _redraw_on_connection_change(state)
     interval = float(max(1, int(state.bridge_heartbeat_interval_seconds or 5)))
@@ -1065,6 +1212,8 @@ def _refresh_bridge_state(context) -> None:
     # a group); never auto-clobber a user who has groups and deliberately picked all-nodes.
     if state.can_run_on_all_clients and state.group_count == 0:
         state.run_on_all_nodes = True
+    if scope_options is not None:
+        _seed_remembered_target(context, client)
     if state.is_signed_in and scope_error:
         state.status_message = "Signed in. Execution scope unavailable."
     else:
@@ -1451,6 +1600,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
                 raise BridgeClientError(_selected_mode_policy_message(state))
 
             response = _run_selected_launch(context)
+            _sticky_render_settings_after_submit(context)
             state.status_message = _selected_mode_launched_message(state)
             self.report({"INFO"}, response.message or response.status or "Render launched.")
             _tag_job_areas_redraw()

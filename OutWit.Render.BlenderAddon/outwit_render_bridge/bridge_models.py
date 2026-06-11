@@ -45,6 +45,18 @@ def _get_value(data: dict[str, Any], name: str, default: Any = None) -> Any:
     return default
 
 
+def _get_int(data: dict[str, Any], name: str, default: int) -> int:
+    """Int field where 0 is a legitimate stored value (so `int(x or default)` would clobber it)."""
+    value = _get_value(data, name, None)
+    if value is None or value == "":
+        return default
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(slots=True)
 class BridgeLocalConnectionContext:
     local_rest_url: str
@@ -195,6 +207,54 @@ class ExecutionScopeOptionsResponse:
             groups=[ExecutionGroupOptionResponse.from_json(me) for me in _get_value(data, "Groups") or []],
             projects=[ExecutionProjectOptionResponse.from_json(me) for me in _get_value(data, "Projects") or []],
         )
+
+
+@dataclass(slots=True)
+class RenderSettingsResponse:
+    """Persisted per-user render preferences (Phase 5 bucket 1) — the BRIDGE owns the storage;
+    this is the wire snapshot travelling both directions (seed on connect, sticky-write on submit)."""
+
+    remember_render_settings: bool = True
+    split_frame: bool = False
+    tiles_x: int = 2
+    tiles_y: int = 2
+    tile_overlap: int = 8
+    anim_result: str = "Sequence"
+    video_container: str = ""
+    video_codec: str = ""
+    last_group_id: str = ""
+    last_group_name: str = ""
+
+    @staticmethod
+    def from_json(data: dict[str, Any] | str) -> "RenderSettingsResponse":
+        data = _ensure_mapping(data)
+        return RenderSettingsResponse(
+            remember_render_settings=bool(_get_value(data, "RememberRenderSettings", True)),
+            split_frame=bool(_get_value(data, "SplitFrame")),
+            tiles_x=_get_int(data, "TilesX", 2),
+            tiles_y=_get_int(data, "TilesY", 2),
+            tile_overlap=_get_int(data, "TileOverlap", 8),
+            anim_result=str(_get_value(data, "AnimResult") or "Sequence"),
+            video_container=str(_get_value(data, "VideoContainer") or ""),
+            video_codec=str(_get_value(data, "VideoCodec") or ""),
+            last_group_id=str(_get_value(data, "LastGroupId") or ""),
+            last_group_name=str(_get_value(data, "LastGroupName") or ""),
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        """The SetRenderSettingsAsync body shape (PascalCase keys, mirrors the C# contract)."""
+        return {
+            "RememberRenderSettings": bool(self.remember_render_settings),
+            "SplitFrame": bool(self.split_frame),
+            "TilesX": int(self.tiles_x),
+            "TilesY": int(self.tiles_y),
+            "TileOverlap": int(self.tile_overlap),
+            "AnimResult": self.anim_result or "",
+            "VideoContainer": self.video_container or "",
+            "VideoCodec": self.video_codec or "",
+            "LastGroupId": self.last_group_id or "",
+            "LastGroupName": self.last_group_name or "",
+        }
 
 
 @dataclass(slots=True)

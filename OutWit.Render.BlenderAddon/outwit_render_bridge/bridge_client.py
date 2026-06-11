@@ -15,6 +15,7 @@ from .bridge_models import (
     ExecutionScopeOptionsResponse,
     GetJobResponse,
     RenderPreflightResponse,
+    RenderSettingsResponse,
     RenderValidateBlendResponse,
     RunRenderResponse,
     SessionStateResponse,
@@ -161,6 +162,12 @@ class BridgeClient:
 
     def download_result(self, job_id: str) -> DownloadResultResponse:
         return self._post("DownloadResultAsync", DownloadResultResponse.from_json, job_id)
+
+    def get_render_settings(self) -> RenderSettingsResponse:
+        return self._get("GetRenderSettingsAsync", RenderSettingsResponse.from_json)
+
+    def set_render_settings(self, settings: dict[str, Any]) -> bool:
+        return self._post("SetRenderSettingsAsync", lambda data: bool(data), settings)
 
     def _get(self, method_name: str, parser: Callable[[Any], TResponse], **parameters: Any) -> TResponse:
         context, _ = self._load_context()

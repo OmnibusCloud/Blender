@@ -5,6 +5,18 @@ from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import AddonPreferences
 
 
+def _on_remember_render_settings_changed(self, context) -> None:
+    # Transient binding: the persisted value lives on the BRIDGE's per-user settings store, not in
+    # Blender's userprefs (which merely echo it). Late import dodges a module cycle; a push failure
+    # is left pending and retried by the heartbeat pump.
+    try:
+        from . import bridge_operators
+
+        bridge_operators.on_remember_render_settings_changed(context)
+    except Exception:
+        pass
+
+
 class OutWitBridgeAddonPreferences(AddonPreferences):
     bl_idname = __package__ or "OutWit.Render.BlenderAddon"
 
@@ -28,6 +40,15 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
         default=True,
     )
 
+    remember_render_settings: BoolProperty(
+        name="Remember last render settings",
+        description="Keep your working render preferences (split/tiles, animation result, target) "
+                    "on this computer and restore them next session (stored per OS user on the "
+                    "local bridge, not synced)",
+        default=True,
+        update=_on_remember_render_settings_changed,
+    )
+
     logo_variant: EnumProperty(
         name="Logo Variant",
         description="Choose the OmnibusCloud logo variant used by the addon UI",
@@ -46,6 +67,10 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
         layout.prop(self, "bridge_executable_path")
         layout.prop(self, "auto_start_bridge")
         layout.label(text="If empty, the addon also searches OUTWIT_BRIDGE_SESSION_DIR, temp/BridgeSession, and ./BridgeSession.")
+        layout.separator()
+        layout.label(text="Settings Memory")
+        layout.prop(self, "remember_render_settings")
+        layout.label(text="Stored on this computer for your OS user - not in your account, not synced.")
         layout.separator()
         layout.label(text="OmnibusCloud Branding")
         layout.prop(self, "logo_variant")
