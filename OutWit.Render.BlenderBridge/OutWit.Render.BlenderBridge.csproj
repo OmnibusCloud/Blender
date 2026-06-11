@@ -15,6 +15,10 @@
     <PackageReference Include="OutWit.Common" Version="1.3.2" />
     <PackageReference Include="OutWit.Common.DependencyInjection" Version="1.1.*" />
     <PackageReference Include="OutWit.Common.MemoryPack" Version="1.1.4" />
+    <!-- Per-OS-user render preferences (the "remember last render settings" buckets). The OIDC token
+         is NOT stored here — it stays in its own DPAPI-encrypted file (BridgeSessionStore). -->
+    <PackageReference Include="OutWit.Common.Settings" Version="2.0.2" />
+    <PackageReference Include="OutWit.Common.Settings.Json" Version="2.1.1" />
     <PackageReference Include="OutWit.Communication.Client" Version="2.3.3" />
     <PackageReference Include="OutWit.Communication.Client.WebSocket" Version="2.3.3" />
     <PackageReference Include="OutWit.Communication.Server.DependencyInjection" Version="2.3.9" />
