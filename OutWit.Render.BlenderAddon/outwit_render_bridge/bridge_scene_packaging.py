@@ -13,6 +13,25 @@ class ScenePackagingError(Exception):
     pass
 
 
+def scene_output_signature(scene) -> str:
+    """Fingerprint of the Output Properties facets that travel INSIDE the uploaded .blend rather
+    than as explicit render options: image format family, color mode/depth, film transparency,
+    and the video container/codec (which have no explicit wire fields yet). The upload cache must
+    be invalidated when it changes — reusing the cached blob after, e.g., a PNG→EXR or container
+    switch would silently render with the stale baked-in settings."""
+    render = getattr(scene, "render", None)
+    image = getattr(render, "image_settings", None)
+    ffmpeg = getattr(render, "ffmpeg", None)
+    return "|".join((
+        str(getattr(image, "file_format", "") or ""),
+        str(getattr(image, "color_mode", "") or ""),
+        str(getattr(image, "color_depth", "") or ""),
+        "T" if getattr(render, "film_transparent", False) else "O",
+        str(getattr(ffmpeg, "format", "") or ""),
+        str(getattr(ffmpeg, "codec", "") or ""),
+    ))
+
+
 @contextmanager
 def create_packed_upload_copy(source_blend_path: str):
     if not source_blend_path:

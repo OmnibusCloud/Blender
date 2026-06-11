@@ -42,7 +42,7 @@ from .bridge_render_settings import (
     seed_prop_values,
 )
 from .bridge_scene_attachments import collect_scene_attachment_metadata, summarize_scene_attachment_metadata
-from .bridge_scene_packaging import create_packed_upload_copy, ScenePackagingError
+from .bridge_scene_packaging import create_packed_upload_copy, scene_output_signature, ScenePackagingError
 from .bridge_state import ALL_CLIENTS_GROUP_ID, NO_GROUP_ID, apply_render_mode_to_axes
 
 FORMAT_PNG = 0
@@ -540,14 +540,21 @@ def _ensure_uploaded_blob_id(state) -> str:
     return state.uploaded_blob_id
 
 
-def _scene_requires_upload(state, blend_path: str) -> bool:
-    return not state.uploaded_blob_id or state.uploaded_source_path != blend_path
+def _scene_requires_upload(state, blend_path: str, output_signature: str) -> bool:
+    # The path alone is NOT enough: output settings that travel inside the .blend (format family,
+    # color mode/depth, transparency, video container/codec) make the cached blob stale when changed.
+    return (
+        not state.uploaded_blob_id
+        or state.uploaded_source_path != blend_path
+        or state.uploaded_output_signature != output_signature
+    )
 
 
 def _upload_current_blend(context):
     state = _get_runtime_state(context)
     client = _get_bridge_client(context)
     blend_path = _get_current_blend_path()
+    output_signature = scene_output_signature(context.scene)
     planned_attachments = collect_scene_attachment_metadata()
     _apply_dependency_plan(state, planned_attachments)
     attachments = _upload_scene_attachments(client, planned_attachments)
@@ -563,6 +570,7 @@ def _upload_current_blend(context):
     state.current_blend_path = blend_path
     state.uploaded_blob_id = response.blob_id
     state.uploaded_source_path = blend_path
+    state.uploaded_output_signature = output_signature
     state.uploaded_file_name = response.file_name
     state.uploaded_file_size = response.file_size
     state.uploaded_attachment_manifest_json = json.dumps(attachments, ensure_ascii=False)
@@ -573,7 +581,7 @@ def _upload_current_blend(context):
 def _ensure_current_scene_uploaded(context):
     state = _get_runtime_state(context)
     blend_path = _get_current_blend_path()
-    if _scene_requires_upload(state, blend_path):
+    if _scene_requires_upload(state, blend_path, scene_output_signature(context.scene)):
         return _upload_current_blend(context)
 
     state.current_blend_path = blend_path
@@ -595,11 +603,12 @@ def _upload_worker(context_directory: str, blend_path: str, planned_attachments:
     return {"response": response, "attachments": attachments, "upload_message": upload_message}
 
 
-def _apply_upload_result(state, blend_path: str, result: dict) -> None:
+def _apply_upload_result(state, blend_path: str, output_signature: str, result: dict) -> None:
     response = result["response"]
     state.current_blend_path = blend_path
     state.uploaded_blob_id = response.blob_id
     state.uploaded_source_path = blend_path
+    state.uploaded_output_signature = output_signature
     state.uploaded_file_name = response.file_name
     state.uploaded_file_size = response.file_size
     state.uploaded_attachment_manifest_json = json.dumps(result["attachments"], ensure_ascii=False)
@@ -1478,6 +1487,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
     _task = None
     _timer = None
     _blend_path = ""
+    _output_signature = ""
     _pending_frame_count = 0
 
     def invoke(self, context, event):
@@ -1513,7 +1523,8 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
 
-        if not _scene_requires_upload(state, self._blend_path):
+        self._output_signature = scene_output_signature(context.scene)
+        if not _scene_requires_upload(state, self._blend_path, self._output_signature):
             # Scene already uploaded — just run the fast tail (validate -> preflight -> submit).
             state.current_blend_path = self._blend_path
             return self._finish_launch(context)
@@ -1559,7 +1570,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             return {"CANCELLED"}
 
         try:
-            _apply_upload_result(state, self._blend_path, task.result)
+            _apply_upload_result(state, self._blend_path, self._output_signature, task.result)
         except Exception as ex:
             _launch_in_progress = False
             state.last_error = str(ex)

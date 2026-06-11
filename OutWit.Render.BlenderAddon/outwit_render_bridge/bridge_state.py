@@ -160,6 +160,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     current_blend_is_dirty: BoolProperty(name="Current Blend Is Dirty", default=False)
     uploaded_blob_id: StringProperty(name="Uploaded Blob Id", default="")
     uploaded_source_path: StringProperty(name="Uploaded Source Path", default="")
+    uploaded_output_signature: StringProperty(name="Uploaded Output Signature", default="")
     uploaded_file_name: StringProperty(name="Uploaded File Name", default="")
     uploaded_file_size: IntProperty(name="Uploaded File Size", default=0)
     uploaded_attachment_manifest_json: StringProperty(name="Uploaded Attachment Manifest Json", default="")

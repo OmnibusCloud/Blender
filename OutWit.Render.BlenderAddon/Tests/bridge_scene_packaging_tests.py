@@ -66,5 +66,49 @@ class BridgeScenePackagingTests(unittest.TestCase):
                     self.fail("Expected ScenePackagingError before yielding a packed copy.")
 
 
+class SceneOutputSignatureTests(unittest.TestCase):
+    """The upload-cache key half of Phase 5 D: a change in any Output Properties facet that travels
+    inside the .blend must produce a different signature → force a re-upload."""
+
+    @staticmethod
+    def _scene(file_format="PNG", color_mode="RGBA", color_depth="8",
+               film_transparent=False, ffmpeg_format="", ffmpeg_codec=""):
+        return SimpleNamespace(render=SimpleNamespace(
+            image_settings=SimpleNamespace(
+                file_format=file_format, color_mode=color_mode, color_depth=color_depth),
+            film_transparent=film_transparent,
+            ffmpeg=SimpleNamespace(format=ffmpeg_format, codec=ffmpeg_codec),
+        ))
+
+    def test_same_output_settings_produce_stable_signature(self) -> None:
+        module = _load_bridge_scene_packaging_module("")
+
+        self.assertEqual(
+            module.scene_output_signature(self._scene()),
+            module.scene_output_signature(self._scene()),
+        )
+
+    def test_each_output_facet_changes_the_signature(self) -> None:
+        module = _load_bridge_scene_packaging_module("")
+        base = module.scene_output_signature(self._scene())
+
+        variants = [
+            self._scene(file_format="OPEN_EXR"),
+            self._scene(color_mode="RGB"),
+            self._scene(color_depth="16"),
+            self._scene(film_transparent=True),
+            self._scene(ffmpeg_format="MPEG4"),
+            self._scene(ffmpeg_codec="H264"),
+        ]
+
+        for variant in variants:
+            self.assertNotEqual(base, module.scene_output_signature(variant))
+
+    def test_missing_render_attributes_do_not_raise(self) -> None:
+        module = _load_bridge_scene_packaging_module("")
+
+        self.assertIsInstance(module.scene_output_signature(SimpleNamespace()), str)
+
+
 if __name__ == "__main__":
     unittest.main()
