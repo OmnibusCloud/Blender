@@ -29,10 +29,12 @@ from .bridge_engine_routing import (
 )
 from .bridge_status import (
     Phase,
+    authorized_group_count,
     compute_status,
     first_non_empty,
     first_summary_item,
     merge_unique_summaries,
+    target_label,
     target_option_count,
 )
 
@@ -361,11 +363,25 @@ def _draw_output(layout, context, state, view) -> None:
         video.label(text="Encodes after all frames return", icon="INFO")
 
 
+def _draw_target(layout, state) -> None:
+    """Target = a specific GROUP (dropdown). 'Run on all nodes' is a separate checkbox, shown only when
+    the account is allowed to; when it is checked the group dropdown is disabled. With no authorized
+    groups the dropdown is hidden — the checkbox is then the only target."""
+    if not state.is_signed_in:
+        return
+
+    col = layout.column(align=True)
+    if state.can_run_on_all_clients:
+        col.prop(state, "run_on_all_nodes")
+
+    if authorized_group_count(state) > 0:
+        row = col.row()
+        row.enabled = not (state.can_run_on_all_clients and state.run_on_all_nodes)
+        row.prop(state, "selected_client_group")
+
+
 def _draw_render_setup(layout, context, state, view) -> None:
-    # Target — always offered while signed in: picking the render group is the core crowd-compute flow,
-    # so the control stays visible even with a single option (it still reassures where the job runs).
-    if state.is_signed_in:
-        layout.prop(state, "selected_client_group")
+    _draw_target(layout, state)
 
     _draw_output(layout, context, state, view)
 
@@ -403,7 +419,7 @@ def _draw_job_lifecycle(layout, state, view) -> None:
     context_block = layout.column(align=True)
     context_block.enabled = False
     if state.is_signed_in and target_option_count(state) > 1:
-        context_block.prop(state, "selected_client_group")
+        context_block.label(text=f"Target: {target_label(state)}")
     context_block.label(text=f"Output: {_render_mode_label(state)}")
 
     layout.label(text=view.status_line, icon=view.status_icon)

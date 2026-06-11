@@ -36,7 +36,7 @@ from .bridge_launcher import (
 )
 from .bridge_scene_attachments import collect_scene_attachment_metadata, summarize_scene_attachment_metadata
 from .bridge_scene_packaging import create_packed_upload_copy, ScenePackagingError
-from .bridge_state import ALL_CLIENTS_GROUP_ID, apply_render_mode_to_axes
+from .bridge_state import ALL_CLIENTS_GROUP_ID, NO_GROUP_ID, apply_render_mode_to_axes
 
 FORMAT_PNG = 0
 FORMAT_EXR = 1
@@ -125,9 +125,13 @@ def _get_context_directory(context) -> str:
 
 
 def _get_selected_client_group_id(state) -> str:
-    """Resolves the Target dropdown to a group id, or '' for the unscoped 'all clients' option."""
+    """Resolves the render target to a group id, or '' for the unscoped 'all nodes' option.
+    'All nodes' is now the run_on_all_nodes checkbox (only honoured when the account allows it); the
+    Target dropdown carries groups only."""
+    if getattr(state, "run_on_all_nodes", False) and getattr(state, "can_run_on_all_clients", False):
+        return ""
     selected = getattr(state, "selected_client_group", "") or ""
-    if not selected or selected == ALL_CLIENTS_GROUP_ID:
+    if not selected or selected in (ALL_CLIENTS_GROUP_ID, NO_GROUP_ID):
         return ""
     return selected
 
@@ -785,6 +789,31 @@ def _auto_refresh_job_timer() -> float:
 _lazy_launch_call: AsyncCall | None = None
 _lazy_launch_failed = False
 
+# Last connection-relevant state shown in the panel. The heartbeat timer changes this state off the
+# draw cycle, but Blender does not repaint the N-panel until a UI event (the "stuck on Connecting…
+# until you hover" symptom). When the signature changes we tag the 3D areas for redraw so the panel
+# reflects the new phase immediately — this is what lets us drop the manual Refresh button.
+_last_conn_signature: tuple | None = None
+
+
+def _connection_signature(state) -> tuple:
+    return (
+        bool(getattr(state, "bridge_is_running", False)),
+        bool(getattr(state, "is_signed_in", False)),
+        bool(getattr(state, "bridge_lease_acquired", False)),
+        getattr(state, "bridge_launch_message", ""),
+        getattr(state, "last_error", ""),
+        getattr(state, "active_job_status", ""),
+    )
+
+
+def _redraw_on_connection_change(state) -> None:
+    global _last_conn_signature
+    signature = _connection_signature(state)
+    if signature != _last_conn_signature:
+        _last_conn_signature = signature
+        _tag_job_areas_redraw()
+
 
 def _addon_auto_start_enabled(context) -> bool:
     try:
@@ -855,6 +884,8 @@ def _bridge_lease_timer() -> float:
 
     refresh_bridge_process_state(context)
     _pump_lazy_first_start(context)
+    # Repaint the panel when the connection phase changes (heartbeat-driven; replaces manual Refresh).
+    _redraw_on_connection_change(state)
     interval = float(max(1, int(state.bridge_heartbeat_interval_seconds or 5)))
 
     # While a lazy launch is spawning, tick fast so its result is marshalled back promptly.
@@ -1029,6 +1060,11 @@ def _refresh_bridge_state(context) -> None:
         json.dumps([{"id": group.group_id, "name": group.name} for group in scope_options.groups])
         if scope_options else ""
     )
+    # Default the target: with all-nodes permission but NO groups, "Run on all nodes" is the only valid
+    # choice → pre-check it. When groups exist, leave the choice alone (the Target dropdown defaults to
+    # a group); never auto-clobber a user who has groups and deliberately picked all-nodes.
+    if state.can_run_on_all_clients and state.group_count == 0:
+        state.run_on_all_nodes = True
     if state.is_signed_in and scope_error:
         state.status_message = "Signed in. Execution scope unavailable."
     else:

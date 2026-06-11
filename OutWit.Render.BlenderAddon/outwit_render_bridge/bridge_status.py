@@ -99,6 +99,21 @@ class Blocker:
         return bool(self.fix_operator)
 
 
+# The only Blender output formats the render controller actually honours (BlenderRenderArgsBuilder +
+# the RenderFormat wire enum). Anything else — TIFF, BMP, TARGA, WEBP, … — used to be SILENTLY mapped
+# to PNG (_map_render_format's default), so the artist asked for TIFF and got a PNG. We now BLOCK an
+# unsupported format with a clear message instead of producing a quietly-wrong result. Image-producing
+# modes only (Video encodes to a container, so the frame format is intermediate, not the deliverable).
+SUPPORTED_IMAGE_FORMATS = frozenset({"PNG", "OPEN_EXR", "OPEN_EXR_MULTILAYER", "JPEG"})
+_IMAGE_OUTPUT_MODES = frozenset({"Still", "StillTiled", "Frames"})
+
+
+def _scene_image_format(scene) -> str:
+    render = getattr(scene, "render", None)
+    image_settings = getattr(render, "image_settings", None)
+    return (getattr(image_settings, "file_format", "") or "") if image_settings is not None else ""
+
+
 # endregion
 
 
@@ -161,16 +176,38 @@ def first_non_empty(*values: str) -> str:
 
 
 def target_option_count(state) -> int:
-    """How many render targets the Target dropdown would offer: 'All clients' (when allowed) plus each
-    authorized group. Mirrors bridge_state.selected_group_items so the panel can hide the control when
-    there is only one choice. Always >= 1 (the control falls back to a single 'All clients' entry)."""
+    """How many render targets exist: 'all nodes' (when allowed) plus each authorized group. Always
+    >= 1. Used as the read-only job-context cue (was the Target-dropdown hide test before 'all nodes'
+    became a checkbox)."""
     count = 1 if getattr(state, "can_run_on_all_clients", False) else 0
+    count += authorized_group_count(state)
+    return max(1, count)
+
+
+def authorized_group_count(state) -> int:
+    """Number of authorized GROUPS only ('all nodes' is a separate checkbox, not counted here). 0 when
+    the user has no groups — the Target dropdown is then hidden (the all-nodes checkbox covers them)."""
     try:
         groups = json.loads(getattr(state, "groups_json", "") or "") or []
     except (ValueError, TypeError):
         groups = []
-    count += sum(1 for group in groups if str(group.get("id", "")).strip())
-    return max(1, count)
+    return sum(1 for group in groups if str(group.get("id", "")).strip())
+
+
+def target_label(state) -> str:
+    """Human label for the resolved render target — 'All nodes' or the selected group's name. Used as
+    the read-only cue while a job runs (the editable controls are hidden then)."""
+    if getattr(state, "run_on_all_nodes", False) and getattr(state, "can_run_on_all_clients", False):
+        return "All nodes"
+    selected = getattr(state, "selected_client_group", "") or ""
+    try:
+        groups = json.loads(getattr(state, "groups_json", "") or "") or []
+    except (ValueError, TypeError):
+        groups = []
+    for group in groups:
+        if str(group.get("id", "")).strip() == selected:
+            return str(group.get("name", "")).strip() or selected
+    return "—"
 
 
 # endregion
@@ -387,6 +424,15 @@ def _primary_blocker(scene, state) -> Blocker | None:
         return Blocker(
             BlockerKind.UNSUPPORTED_ENGINE,
             "Unsupported render engine (use Cycles, Eevee, or Grease Pencil)",
+        )
+
+    image_format = _scene_image_format(scene)
+    if getattr(state, "render_mode", "Still") in _IMAGE_OUTPUT_MODES \
+            and image_format and image_format not in SUPPORTED_IMAGE_FORMATS:
+        return Blocker(
+            BlockerKind.SWITCH_FORMAT,
+            f"Output format '{image_format}' is not supported — use PNG, EXR, or JPEG "
+            "(set it in Output Properties > File Format).",
         )
 
     simulation = _simulation_cache_block(state)

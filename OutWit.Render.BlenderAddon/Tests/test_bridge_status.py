@@ -278,5 +278,66 @@ class OutputAxisMappingTests(unittest.TestCase):
             self.assertEqual(status.render_mode_for_axes(axis, split, result), mode)
 
 
+class UnsupportedFormatBlockerTests(unittest.TestCase):
+    """The controller honours only PNG/EXR/JPEG; an unsupported output format used to be SILENTLY
+    rendered as PNG. compute_status now blocks it (SWITCH_FORMAT) for image-producing modes."""
+
+    def setUp(self):
+        global _DEP_BLOCK, _SIM_BLOCK
+        _DEP_BLOCK = ""
+        _SIM_BLOCK = ""
+
+    def test_tiff_blocks_in_image_mode(self):
+        view = status.compute_status(make_scene(file_format="TIFF"), make_state(render_mode="Still"))
+        self.assertEqual(view.phase, status.Phase.BLOCKED)
+        self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT)
+        self.assertFalse(view.is_ready)
+
+    def test_supported_formats_do_not_block(self):
+        for fmt in ("PNG", "OPEN_EXR", "OPEN_EXR_MULTILAYER", "JPEG"):
+            view = status.compute_status(make_scene(file_format=fmt), make_state(render_mode="Still"))
+            self.assertNotEqual(view.blocker.kind if view.blocker else status.BlockerKind.NONE,
+                                status.BlockerKind.SWITCH_FORMAT, fmt)
+
+    def test_frames_mode_also_blocks_unsupported(self):
+        view = status.compute_status(make_scene(file_format="BMP"), make_state(render_mode="Frames"))
+        self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT)
+
+    def test_video_mode_ignores_image_format(self):
+        # Video encodes to a container; the per-frame image format is intermediate, not the deliverable.
+        view = status.compute_status(make_scene(file_format="TIFF"), make_state(render_mode="Video"))
+        self.assertNotEqual(view.blocker.kind if view.blocker else status.BlockerKind.NONE,
+                            status.BlockerKind.SWITCH_FORMAT)
+
+
+class TargetResolutionTests(unittest.TestCase):
+    """'All nodes' is a checkbox; Target carries groups only (authorized_group_count / target_label)."""
+
+    _TWO_GROUPS = '[{"id": "g1", "name": "Studio GPUs"}, {"id": "g2", "name": "Farm"}]'
+
+    def test_group_count_is_groups_only(self):
+        self.assertEqual(status.authorized_group_count(make_state(groups_json=self._TWO_GROUPS)), 2)
+        self.assertEqual(status.authorized_group_count(make_state(groups_json="")), 0)
+        self.assertEqual(
+            status.authorized_group_count(make_state(groups_json='[{"id": "  ", "name": "blank"}]')), 0)
+
+    def test_target_label_all_nodes(self):
+        label = status.target_label(make_state(run_on_all_nodes=True, can_run_on_all_clients=True))
+        self.assertEqual(label, "All nodes")
+
+    def test_target_label_group_name(self):
+        label = status.target_label(make_state(
+            run_on_all_nodes=False, can_run_on_all_clients=False,
+            groups_json=self._TWO_GROUPS, selected_client_group="g2"))
+        self.assertEqual(label, "Farm")
+
+    def test_all_nodes_only_when_allowed(self):
+        # The checkbox is honoured only with the permission; checked-but-not-allowed falls back to group.
+        label = status.target_label(make_state(
+            run_on_all_nodes=True, can_run_on_all_clients=False,
+            groups_json=self._TWO_GROUPS, selected_client_group="g1"))
+        self.assertEqual(label, "Studio GPUs")
+
+
 if __name__ == "__main__":
     unittest.main()

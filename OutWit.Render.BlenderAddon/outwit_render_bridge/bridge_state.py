@@ -9,8 +9,14 @@ from bpy.types import PropertyGroup, WindowManager
 from .bridge_status import axes_for_render_mode, render_mode_for_axes
 
 
-# Sentinel enum identifier for the "any available client" target (no specific group).
+# Sentinel enum identifier for the "any available client" target (no specific group). Kept for
+# back-compat in the group-id resolver; "all nodes" is now a separate checkbox (run_on_all_nodes),
+# not an entry in the Target dropdown.
 ALL_CLIENTS_GROUP_ID = "__ALL__"
+
+# Placeholder identifier when the user has no authorized groups — keeps the EnumProperty non-empty
+# (Blender requires >= 1 item) while the control is hidden/disabled.
+NO_GROUP_ID = "__NONE__"
 
 # Blender keeps only weak references to the strings returned by a dynamic EnumProperty
 # items callback; if we build them inline they get garbage-collected and the UI shows
@@ -19,16 +25,14 @@ _GROUP_ENUM_ITEMS_CACHE: list[tuple[str, str, str]] = []
 
 
 def selected_group_items(self, context):
-    """Builds the Target dropdown: 'All clients' (when allowed) + each authorized group.
+    """Builds the Target dropdown: the authorized GROUPS only.
 
-    Reads the groups the bridge reported for the signed-in user (serialized into
-    ``groups_json``) plus ``can_run_on_all_clients``. Identifier is the group id GUID,
-    or ``ALL_CLIENTS_GROUP_ID`` for the unscoped option.
+    'All clients / all nodes' is NOT an entry here — it is a separate checkbox (run_on_all_nodes),
+    so Target always means "a specific group". Reads the groups the bridge reported for the signed-in
+    user (serialized into ``groups_json``). A placeholder keeps the enum non-empty when the user has
+    no groups (the control is hidden/disabled in that case).
     """
     items: list[tuple[str, str, str]] = []
-
-    if self.can_run_on_all_clients:
-        items.append((ALL_CLIENTS_GROUP_ID, "All clients", "Render on any available client"))
 
     try:
         groups = json.loads(self.groups_json) if self.groups_json else []
@@ -42,9 +46,8 @@ def selected_group_items(self, context):
         name = str(group.get("name", "")).strip() or group_id
         items.append((group_id, name, f"Render on group '{name}'"))
 
-    # Always offer at least one option so the control is never empty.
     if not items:
-        items.append((ALL_CLIENTS_GROUP_ID, "All clients", "Render on any available client"))
+        items.append((NO_GROUP_ID, "No groups", "You have no authorized render groups"))
 
     _GROUP_ENUM_ITEMS_CACHE.clear()
     _GROUP_ENUM_ITEMS_CACHE.extend(items)
@@ -97,8 +100,14 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     groups_json: StringProperty(name="Groups Json", default="")
     selected_client_group: EnumProperty(
         name="Target",
-        description="Which clients to render on: all available clients, or a specific group",
+        description="Which group of nodes to render on",
         items=selected_group_items,
+    )
+    run_on_all_nodes: BoolProperty(
+        name="Run on all nodes",
+        description="Render on any available node instead of a specific group "
+                    "(only offered when your account is allowed to)",
+        default=False,
     )
     current_user_display_name: StringProperty(name="Display Name", default="")
     current_user_id: StringProperty(name="User Id", default="")
