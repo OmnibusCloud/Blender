@@ -2,6 +2,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OutWit.Common.DependencyInjection;
+using OutWit.Common.Settings;
+using OutWit.Common.Settings.Configuration;
+using OutWit.Common.Settings.Json;
 using OutWit.Render.BlenderBridge.Channels;
 using OutWit.Render.BlenderBridge.Channels.Interfaces;
 using OutWit.Render.BlenderBridge.Configuration;
@@ -15,6 +18,7 @@ using OutWit.Render.BlenderBridge.Services.Hosting.Interfaces;
 using OutWit.Render.BlenderBridge.Services.Render;
 using OutWit.Render.BlenderBridge.Services.Render.Interfaces;
 using OutWit.Render.BlenderBridge.Tests.Infrastructure.Auth;
+using OutWit.Render.BlenderBridge.Utils;
 
 namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
 {
@@ -39,7 +43,7 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
         {
             var builder = Host.CreateApplicationBuilder();
             builder.Logging.AddSimpleConsole();
-            builder.Services.AddSingleton(new BridgeSettings
+            var settings = new BridgeSettings
             {
                 ServerUrl = serverUrl,
                 IdentityUrl = identityUrl,
@@ -51,7 +55,17 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
                 LeaseTimeoutSeconds = 30,
                 OrphanGracePeriodSeconds = 600,
                 WatchdogIntervalSeconds = 5
-            });
+            };
+            builder.Services.AddSingleton(settings);
+
+            // Mirrors Program.cs: per-user render preferences; sessionDir is rooted, so the store
+            // materializes inside the test temp directory.
+            builder.Services.AddSettings(s => s
+                .UseJsonResource(typeof(BlenderBridgeChannel).Assembly, "render-settings.json")
+                .UseJsonFile(
+                    BridgeUserStorageUtils.ResolveUserDataFilePath(settings, "render-settings.json"),
+                    SettingsScope.User)
+                .RegisterContainer<BridgeRenderSettings>());
             builder.Services.AddSingletonWithInject<IBridgeSystemBrowserLauncher, BridgeHttpGetBrowserLauncher>();
             builder.Services.AddSingletonWithInject<IBridgeAuthorizationCallbackListenerFactory, BridgeAuthorizationCallbackListenerFactory>();
             builder.Services.AddSingletonWithInject<IBridgeLocalSessionSecretService, BridgeLocalSessionSecretService>();
@@ -69,6 +83,7 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
             builder.Services.AddSingletonWithInject<IBridgeExecutionScopeService, BridgeExecutionScopeService>();
             builder.Services.AddSingletonWithInject<IBridgeBlobTransferService, BridgeBlobTransferService>();
             builder.Services.AddSingletonWithInject<IBridgeRenderLaunchService, BridgeRenderLaunchService>();
+            builder.Services.AddSingletonWithInject<IBridgeRenderPreferenceService, BridgeRenderPreferenceService>();
             builder.Services.AddSingletonWithInject<IBridgeJobQueryService, BridgeJobQueryService>();
             builder.Services.AddSingletonWithInject<IBridgeDownloadService, BridgeDownloadService>();
             builder.Services.AddSingletonWithInject<IBlenderBridgeChannel, BlenderBridgeChannel>();

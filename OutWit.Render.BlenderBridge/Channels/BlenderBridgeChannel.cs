@@ -229,6 +229,16 @@ namespace OutWit.Render.BlenderBridge.Channels
             return DownloadService.DownloadResultAsync(jobId);
         }
 
+        public Task<RenderSettingsResponse> GetRenderSettingsAsync()
+        {
+            return RenderPreferenceService.GetRenderSettingsAsync();
+        }
+
+        public Task<bool> SetRenderSettingsAsync(RenderSettingsResponse renderSettings)
+        {
+            return RenderPreferenceService.SetRenderSettingsAsync(renderSettings);
+        }
+
         #endregion
 
         #region Properties
@@ -253,6 +263,9 @@ namespace OutWit.Render.BlenderBridge.Channels
 
         [Inject]
         public IBridgeJobQueryService JobQueryService { get; set; } = null!;
+
+        [Inject]
+        public IBridgeRenderPreferenceService RenderPreferenceService { get; set; } = null!;
 
         [Inject]
         public IBridgeDownloadService DownloadService { get; set; } = null!;

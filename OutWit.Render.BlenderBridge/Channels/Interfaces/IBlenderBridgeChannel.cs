@@ -176,5 +176,15 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         /// Downloads the final result of one bridge-launched job into the local bridge download cache.
         /// </summary>
         Task<DownloadResultResponse> DownloadResultAsync(Guid jobId);
+
+        /// <summary>
+        /// Returns the persisted per-user render preferences (sticky "remember last render settings").
+        /// </summary>
+        Task<RenderSettingsResponse> GetRenderSettingsAsync();
+
+        /// <summary>
+        /// Persists the given per-user render preferences snapshot. Returns true on success.
+        /// </summary>
+        Task<bool> SetRenderSettingsAsync(RenderSettingsResponse renderSettings);
     }
 }

@@ -108,6 +108,7 @@ namespace OutWit.Render.BlenderBridge
             builder.Services.AddSingletonWithInject<IBridgeExecutionScopeService, BridgeExecutionScopeService>();
             builder.Services.AddSingletonWithInject<IBridgeBlobTransferService, BridgeBlobTransferService>();
             builder.Services.AddSingletonWithInject<IBridgeRenderLaunchService, BridgeRenderLaunchService>();
+            builder.Services.AddSingletonWithInject<IBridgeRenderPreferenceService, BridgeRenderPreferenceService>();
             builder.Services.AddSingletonWithInject<IBridgeJobQueryService, BridgeJobQueryService>();
             builder.Services.AddSingletonWithInject<IBridgeDownloadService, BridgeDownloadService>();
             builder.Services.AddSingletonWithInject<IBlenderBridgeChannel, BlenderBridgeChannel>();

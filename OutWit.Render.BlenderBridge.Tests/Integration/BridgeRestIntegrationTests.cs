@@ -84,6 +84,60 @@ namespace OutWit.Render.BlenderBridge.Tests.Integration
         }
 
         [Test]
+        public async Task RenderSettingsGetAndSetRoundTripThroughLocalRestBridgeTest()
+        {
+            var tempDir = CreateTempDirectory();
+            const string localRestUrl = "http://127.0.0.1:17792/bridge/";
+
+            try
+            {
+                await using var bridgeHost = new BridgeLocalHost("http://127.0.0.1:5701", localRestUrl, tempDir);
+                await bridgeHost.StartAsync();
+
+                using var http = new HttpClient();
+
+                var defaults = await SendGetAsync<RenderSettingsResponse>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.GetRenderSettingsAsync));
+
+                var updated = new RenderSettingsResponse
+                {
+                    RememberRenderSettings = true,
+                    SplitFrame = true,
+                    TilesX = 3,
+                    TilesY = 5,
+                    TileOverlap = 16,
+                    AnimResult = "Video",
+                    LastGroupId = Guid.NewGuid().ToString(),
+                    LastGroupName = "My Farm"
+                };
+                var saved = await SendPostAsync<bool>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.SetRenderSettingsAsync), updated);
+                var restored = await SendGetAsync<RenderSettingsResponse>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.GetRenderSettingsAsync));
+
+                Assert.Multiple(() =>
+                {
+                    // The first get returns the embedded-resource defaults.
+                    Assert.That(defaults.RememberRenderSettings, Is.True);
+                    Assert.That(defaults.SplitFrame, Is.False);
+                    Assert.That(defaults.TilesX, Is.EqualTo(2));
+                    Assert.That(defaults.TilesY, Is.EqualTo(2));
+                    Assert.That(defaults.TileOverlap, Is.EqualTo(8));
+                    Assert.That(defaults.AnimResult, Is.EqualTo("Sequence"));
+
+                    Assert.That(saved, Is.True);
+                    Assert.That(restored.Is(updated), Is.True, "the set snapshot must read back unchanged");
+                    Assert.That(File.Exists(Path.Combine(tempDir, "render-settings.json")), Is.True,
+                        "the per-user store must materialize in the rooted storage dir");
+                });
+            }
+            finally
+            {
+                DeleteTempDirectory(tempDir);
+            }
+        }
+
+        [Test]
         public async Task LeaseAcquirePingAndReleaseThroughLocalRestBridgePostCallsTest()
         {
             var tempDir = CreateTempDirectory();
