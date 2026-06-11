@@ -3,6 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OutWit.Common.DependencyInjection;
+using OutWit.Common.Settings;
+using OutWit.Common.Settings.Configuration;
+using OutWit.Common.Settings.Json;
 using OutWit.Render.BlenderBridge.Channels;
 using OutWit.Render.BlenderBridge.Channels.Interfaces;
 using OutWit.Render.BlenderBridge.Configuration;
@@ -78,6 +81,21 @@ namespace OutWit.Render.BlenderBridge
             builder.Services.AddSerilog(logger, dispose: true);
 
             builder.Services.AddSingleton(settings);
+
+            // Per-OS-user render PREFERENCES (Phase 5): immutable defaults are embedded in the binary
+            // (render-settings.json resource); the writable user store is a JSON file next to the
+            // encrypted bridge session (%appdata%/OmnibusCloud/Bridge/render-settings.json — survives
+            // addon reinstalls). AddSettings merges defaults into the user store and loads it, and
+            // registers ISettingsManager + BridgeRenderSettings as singletons. The OIDC refresh token
+            // is NOT here — it stays in its own DPAPI-encrypted store (BridgeSessionStore). A corrupt
+            // user store self-heals (quarantined to *.corrupt, defaults win) — it cannot kill startup.
+            builder.Services.AddSettings(s => s
+                .UseJsonResource(typeof(BlenderBridgeProgram).Assembly, "render-settings.json")
+                .UseJsonFile(
+                    Utils.BridgeUserStorageUtils.ResolveUserDataFilePath(settings, "render-settings.json"),
+                    SettingsScope.User)
+                .RegisterContainer<BridgeRenderSettings>());
+
             builder.Services.AddSingletonWithInject<IBridgeSystemBrowserLauncher, BridgeSystemBrowserLauncher>();
             builder.Services.AddSingletonWithInject<IBridgeAuthorizationCallbackListenerFactory, BridgeAuthorizationCallbackListenerFactory>();
             builder.Services.AddSingletonWithInject<IBridgeLocalSessionSecretService, BridgeLocalSessionSecretService>();

@@ -41,6 +41,13 @@
     <Content Include="settings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- Immutable render-preference defaults are EMBEDDED (logical name "render-settings.json") and
+         read via UseJsonResource — baked into the binary, not a loose file (same rationale as the
+         worker client: keeps per-platform bundles signable). The per-user writable store is a JSON
+         file next to the bridge session (%appdata%/OmnibusCloud/Bridge/). -->
+    <EmbeddedResource Include="Resources\render-settings.json">
+      <LogicalName>render-settings.json</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

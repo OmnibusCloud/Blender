@@ -1,0 +1,20 @@
+{
+  "Render": [
+    { "key": "RememberRenderSettings", "value": "True", "valueKind": "Boolean" },
+    { "key": "SplitFrame", "value": "False", "valueKind": "Boolean" },
+    { "key": "TilesX", "value": "2", "valueKind": "Integer" },
+    { "key": "TilesY", "value": "2", "valueKind": "Integer" },
+    { "key": "TileOverlap", "value": "8", "valueKind": "Integer" },
+    { "key": "AnimResult", "value": "Sequence", "valueKind": "String" },
+    { "key": "VideoContainer", "value": "", "valueKind": "String" },
+    { "key": "VideoCodec", "value": "", "valueKind": "String" }
+  ],
+  "Target": [
+    { "key": "LastGroupId", "value": "", "valueKind": "String" },
+    { "key": "LastGroupName", "value": "", "valueKind": "String" }
+  ],
+  "__groups__": {
+    "Render": { "displayName": "Render", "priority": 0 },
+    "Target": { "displayName": "Target", "priority": 1 }
+  }
+}

@@ -6,6 +6,7 @@ using OutWit.Common.DependencyInjection;
 using OutWit.Render.BlenderBridge.Configuration;
 using OutWit.Render.BlenderBridge.Models;
 using OutWit.Render.BlenderBridge.Services.Auth.Interfaces;
+using OutWit.Render.BlenderBridge.Utils;
 
 namespace OutWit.Render.BlenderBridge.Services.Auth
 {
@@ -109,23 +110,11 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
 
         private string GetSessionFilePath()
         {
-            // The OIDC refresh token must survive bridge restarts AND addon reinstalls/updates. Storing it
-            // next to the bundled bridge exe (AppContext.BaseDirectory/<SessionStoragePath>) meant every
-            // addon update wiped it → re-login every session. It now lives under the per-OS-user
-            // application-data directory (%appdata% on Windows, ~/.config on Linux/macOS), which is stable
-            // across reinstalls and writable. A ROOTED SessionStoragePath still wins as an explicit
-            // override (tests / custom deployments). NOTE: the per-session connection-context file is a
-            // SEPARATE concern (BridgeLocalConnectionContextService) and intentionally stays exe-relative,
+            // Per-OS-user so the refresh token survives addon reinstalls (see BridgeUserStorageUtils).
+            // NOTE: the per-session connection-context file is a SEPARATE concern
+            // (BridgeLocalConnectionContextService) and intentionally stays exe-relative,
             // where the addon polls for it.
-            var configured = Settings.SessionStoragePath;
-            if (!string.IsNullOrWhiteSpace(configured) && Path.IsPathRooted(configured))
-                return Path.Combine(configured, "bridge-session.json");
-
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (string.IsNullOrWhiteSpace(appData))
-                appData = AppContext.BaseDirectory;   // last-resort fallback if the OS reports no app-data dir
-
-            return Path.Combine(appData, "OmnibusCloud", "Bridge", "bridge-session.json");
+            return BridgeUserStorageUtils.ResolveUserDataFilePath(Settings, "bridge-session.json");
         }
 
         #endregion
