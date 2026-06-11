@@ -21,13 +21,17 @@ from .bridge_engine_routing import (
 )
 from .bridge_launcher import (
     acquire_bridge_lease,
+    apply_launched_state,
     cleanup_bridge_on_unregister,
     ensure_bridge_running,
     get_effective_context_directory,
     launch_bridge,
+    panel_was_seen,
     ping_bridge_lease,
     refresh_bridge_process_state,
     release_bridge_lease,
+    resolve_launch_target,
+    spawn_bridge_process,
     stop_bridge,
 )
 from .bridge_scene_attachments import collect_scene_attachment_metadata, summarize_scene_attachment_metadata
@@ -773,6 +777,75 @@ def _auto_refresh_job_timer() -> float:
     return 0.5
 
 
+# Lazy-first-start orchestration. The spawn is slow (Popen + wait-for-context up to 15 s) so it runs
+# on a worker thread; this state lives on the main thread and is pumped by the persistent heartbeat
+# timer. _lazy_launch_call is the in-flight spawn; _lazy_launch_failed latches after a failure (e.g.
+# binary not found) to stop a respawn storm until something re-arms it (manual Connect / Phase-4
+# auto-reconnect on a recoverable cause).
+_lazy_launch_call: AsyncCall | None = None
+_lazy_launch_failed = False
+
+
+def _addon_auto_start_enabled(context) -> bool:
+    try:
+        return bool(context.preferences.addons[__package__].preferences.auto_start_bridge)
+    except Exception:
+        return False
+
+
+def rearm_lazy_first_start() -> None:
+    """Clear the failure latch so the heartbeat timer will attempt a lazy launch again. Called by the
+    manual Connect path and (Phase 4) by auto-reconnect on a recoverable cause."""
+    global _lazy_launch_failed
+    _lazy_launch_failed = False
+
+
+def _pump_lazy_first_start(context) -> None:
+    """Drive the one-time lazy bridge launch from the persistent heartbeat timer (main thread). The
+    slow spawn runs on a worker; this only marshals its result back and writes state. No-op once the
+    bridge is running, before the panel has been shown, or while the failure latch is set."""
+    global _lazy_launch_call, _lazy_launch_failed
+    state = context.window_manager.outwit_bridge_state
+
+    # Marshal an in-flight spawn.
+    if _lazy_launch_call is not None:
+        if not _lazy_launch_call.done:
+            return
+        call, _lazy_launch_call = _lazy_launch_call, None
+        if call.error is not None:
+            _lazy_launch_failed = True
+            state.last_error = str(call.error)
+            state.bridge_launch_message = "Bridge auto-start failed."
+            return
+        process_id, executable_path, session_directory = call.result
+        apply_launched_state(state, process_id, executable_path, session_directory)
+        try:
+            acquire_bridge_lease(context)
+        except Exception as ex:  # noqa: BLE001 - surfaced in state, watchdog still protects
+            state.last_error = str(ex)
+        return
+
+    # Decide whether to begin one: lazy-first-start fires only after the panel has been shown.
+    if state.bridge_is_running or _lazy_launch_failed:
+        return
+    if not panel_was_seen() or not _addon_auto_start_enabled(context):
+        return
+
+    try:
+        executable_path, session_directory = resolve_launch_target(context)
+    except BridgeClientError as ex:
+        # Binary not found → BridgeMissing. Latch so we don't respawn-storm; manual Locate re-arms.
+        _lazy_launch_failed = True
+        state.last_error = str(ex)
+        state.bridge_launch_message = "Bridge executable not found."
+        return
+
+    state.bridge_launch_message = "Starting bridge…"
+    _lazy_launch_call = AsyncCall(
+        lambda e=executable_path, s=session_directory: (spawn_bridge_process(e, s), e, s)
+    ).start()
+
+
 def _bridge_lease_timer() -> float:
     context = getattr(bpy, "context", None)
     window_manager = getattr(context, "window_manager", None)
@@ -781,7 +854,13 @@ def _bridge_lease_timer() -> float:
         return 5.0
 
     refresh_bridge_process_state(context)
+    _pump_lazy_first_start(context)
     interval = float(max(1, int(state.bridge_heartbeat_interval_seconds or 5)))
+
+    # While a lazy launch is spawning, tick fast so its result is marshalled back promptly.
+    if _lazy_launch_call is not None:
+        return 0.5
+
     if not state.bridge_is_running or not state.bridge_lease_id:
         return interval
 
@@ -824,6 +903,12 @@ def register_timers() -> None:
 def unregister_timers() -> None:
     if bpy.app.timers.is_registered(_auto_refresh_job_timer):
         bpy.app.timers.unregister(_auto_refresh_job_timer)
+
+    # The lease heartbeat timer is registered in register_timers but was previously
+    # leaked here — on addon reload it stayed alive referencing stale state. Snap it
+    # down with its sibling.
+    if bpy.app.timers.is_registered(_bridge_lease_timer):
+        bpy.app.timers.unregister(_bridge_lease_timer)
 
     if _on_blend_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_blend_load)
@@ -977,6 +1062,9 @@ class OUTWIT_OT_bridge_start(Operator):
     def execute(self, context):
         state = _get_runtime_state(context)
 
+        # An explicit Connect clears the lazy-start failure latch so the heartbeat timer resumes
+        # auto-managing the bridge after this manual attempt.
+        rearm_lazy_first_start()
         try:
             launch_bridge(context)
             _refresh_bridge_state(context)

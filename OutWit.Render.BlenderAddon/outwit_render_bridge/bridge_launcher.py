@@ -15,6 +15,34 @@ from .bridge_context import FILE_PREFIX, FILE_SUFFIX, try_load_latest_context
 
 _LAUNCHED_BRIDGE_PROCESS: subprocess.Popen[str] | None = None
 
+# Lazy-first-start: the bridge is launched the first time the OmnibusCloud panel is shown
+# (not on register()), then lives for the rest of the Blender session — killed only by the
+# .NET parent-PID watchdog (crash path) or graceful shutdown on unregister. There is NO
+# idle-shutdown: hiding the panel does not stop the bridge. `note_panel_visible()` is called
+# from the panel's draw() (UI thread, must stay trivial) and the persistent heartbeat timer
+# performs the one-time off-thread launch.
+_PANEL_SEEN: bool = False
+_LAST_PANEL_DRAW_MONOTONIC: float = 0.0
+
+
+def note_panel_visible() -> None:
+    """Record that the OmnibusCloud panel has been drawn. Called from draw() — keep it trivial
+    (no bpy writes, no I/O): draw() runs on the UI thread and fires very frequently."""
+    global _PANEL_SEEN, _LAST_PANEL_DRAW_MONOTONIC
+    _PANEL_SEEN = True
+    _LAST_PANEL_DRAW_MONOTONIC = time.monotonic()
+
+
+def panel_was_seen() -> bool:
+    """True once the panel has been shown at least once this session — the lazy-start gate."""
+    return _PANEL_SEEN
+
+
+def panel_recently_visible(within_seconds: float = 12.0) -> bool:
+    """True if the panel was drawn within the window — used to throttle redraw/reconnect work to
+    when the user is actually looking at the panel (the lease heartbeat itself runs regardless)."""
+    return _LAST_PANEL_DRAW_MONOTONIC > 0.0 and (time.monotonic() - _LAST_PANEL_DRAW_MONOTONIC) <= within_seconds
+
 
 def _get_preferences(context):
     return context.preferences.addons[__package__].preferences
@@ -83,10 +111,19 @@ def ensure_bridge_running(context) -> None:
     acquire_bridge_lease(context)
 
 
-def launch_bridge(context) -> None:
-    state = context.window_manager.outwit_bridge_state
+def resolve_launch_target(context) -> tuple[Path, Path]:
+    """Main-thread: resolve the bridge executable (reads addon preferences) + its session dir.
+    Raises BridgeClientError when the binary cannot be located → the caller maps that to a
+    BridgeMissing state with a Locate/Install action (no retry storm)."""
     executable_path = resolve_bridge_executable_path(context)
-    session_directory = executable_path.parent / "BridgeSession"
+    return executable_path, executable_path.parent / "BridgeSession"
+
+
+def spawn_bridge_process(executable_path: Path, session_directory: Path) -> int:
+    """Worker-thread-SAFE: spawn the bridge and block until it publishes its connection context.
+    Touches NO bpy state — only subprocess + filesystem — so it can run off the UI thread. Returns
+    the spawned PID and stores the Popen handle for a later graceful stop. Raises on spawn failure
+    or if the context file never appears (the caller marshals the error back to the main thread)."""
     command = build_bridge_command(executable_path)
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
 
@@ -102,15 +139,30 @@ def launch_bridge(context) -> None:
     global _LAUNCHED_BRIDGE_PROCESS
     _LAUNCHED_BRIDGE_PROCESS = process
 
-    state.bridge_process_id = process.pid
+    wait_for_bridge_context(process.pid, session_directory)
+    return process.pid
+
+
+def apply_launched_state(state, process_id: int, executable_path: Path, session_directory: Path) -> None:
+    """Main-thread: write the spawned bridge's identity into the runtime state. Separated from the
+    spawn so the slow spawn can run on a worker and only this cheap write touches bpy."""
+    state.bridge_process_id = process_id
     state.bridge_executable_path = str(executable_path)
     state.bridge_session_directory = str(session_directory)
     state.bridge_started_by_addon = True
     state.bridge_is_running = True
-    state.bridge_launch_message = "Bridge launch requested."
-
-    wait_for_bridge_context(process.pid, session_directory)
     state.bridge_launch_message = "Bridge started by addon."
+
+
+def launch_bridge(context) -> None:
+    """Synchronous (main-thread, BLOCKING) launch — used by the explicit Connect/Start operator.
+    The lazy auto-start path keeps the spawn off the UI thread via spawn_bridge_process +
+    apply_launched_state from the heartbeat timer."""
+    state = context.window_manager.outwit_bridge_state
+    executable_path, session_directory = resolve_launch_target(context)
+    state.bridge_launch_message = "Bridge launch requested."
+    process_id = spawn_bridge_process(executable_path, session_directory)
+    apply_launched_state(state, process_id, executable_path, session_directory)
 
 
 def stop_bridge(context) -> None:

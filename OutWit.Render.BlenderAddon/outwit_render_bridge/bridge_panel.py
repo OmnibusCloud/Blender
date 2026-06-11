@@ -21,6 +21,7 @@ from .bridge_dependency_policy import (
     get_dependency_portability_blocking_issue,
     get_simulation_cache_blocking_issue,
 )
+from .bridge_launcher import note_panel_visible
 from .bridge_engine_routing import (
     recommended_render_mode,
     render_mode_matches_recommendation,
@@ -461,6 +462,10 @@ class OUTWIT_PT_bridge_panel(Panel):
     bl_category = "OmnibusCloud"
 
     def draw(self, context):
+        # Lazy-first-start: showing the OmnibusCloud panel is what triggers the (off-thread) bridge
+        # launch driven by the heartbeat timer. Keep this trivial — draw() runs on the UI thread.
+        note_panel_visible()
+
         layout = self.layout
         state = _get_runtime_state(context)
         view = compute_status(context.scene, state)
