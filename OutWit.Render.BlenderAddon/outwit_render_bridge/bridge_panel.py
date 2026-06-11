@@ -335,9 +335,9 @@ def _draw_output(layout, context, state, view) -> None:
 
     if state.output_axis == "Image":
         layout.prop(state, "still_frame", text="Frame")
-        # Format mirrors the scene's Output Properties for convenience and writes straight back to the
-        # scene (saved in the .blend); the render reads it live at launch, so no re-upload is needed.
-        layout.prop(scene.render.image_settings, "file_format", text="Format")
+        # Curated format list (only farm-supported PNG/EXR/JPEG); bound to the scene's Output Properties,
+        # so the .blend records it and the render reads it live at launch (no re-upload needed).
+        layout.prop(state, "output_format", text="Format")
         layout.prop(state, "split_frame")
         if state.split_frame:
             tiles = layout.box()
@@ -354,8 +354,8 @@ def _draw_output(layout, context, state, view) -> None:
 
     layout.prop(state, "anim_result", expand=True)
     if state.anim_result == "Sequence":
-        # Editable mirror of the scene's output format (writes to the .blend; read live at launch).
-        layout.prop(scene.render.image_settings, "file_format", text="Format")
+        # Curated format list (farm-supported only); bound to the scene's Output Properties.
+        layout.prop(state, "output_format", text="Format")
     else:
         video = layout.box()
         video.prop(state, "video_frame_rate", text="FPS")

@@ -76,6 +76,40 @@ def apply_render_mode_to_axes(state) -> None:
         state.anim_result = anim_result
 
 
+# Output format is a CURATED list — only the formats the render controller actually honours (PNG /
+# OpenEXR / JPEG). Blender's native file_format enum lists ~15 formats; offering the unsupported ones
+# led to "picked TIFF, got PNG" (a silent fallback). This control is bound to the scene's Output
+# Properties via get/set, so the scene stays the single source of truth (the .blend records it, the
+# render reads it live) — we just constrain the choice to what works.
+_OUTPUT_FORMAT_ITEMS = [
+    ("PNG", "PNG", "Lossless 8/16-bit image"),
+    ("OPEN_EXR", "OpenEXR", "High-dynamic-range / linear float"),
+    ("JPEG", "JPEG", "Compressed 8-bit image"),
+]
+# Map a scene file_format string to the curated control's index (EXR multilayer collapses to EXR).
+_OUTPUT_FORMAT_TO_INDEX = {"PNG": 0, "OPEN_EXR": 1, "OPEN_EXR_MULTILAYER": 1, "JPEG": 2}
+
+
+def _scene_image_settings():
+    scene = getattr(bpy.context, "scene", None)
+    render = getattr(scene, "render", None)
+    return getattr(render, "image_settings", None)
+
+
+def _output_format_get(self) -> int:
+    image_settings = _scene_image_settings()
+    fmt = getattr(image_settings, "file_format", "") if image_settings is not None else ""
+    # An out-of-band unsupported format (set in Blender's own Output panel) displays as PNG here; the
+    # compute_status SWITCH_FORMAT blocker still catches it, and picking any item writes a supported one.
+    return _OUTPUT_FORMAT_TO_INDEX.get(fmt, 0)
+
+
+def _output_format_set(self, value: int) -> None:
+    image_settings = _scene_image_settings()
+    if image_settings is not None and 0 <= value < len(_OUTPUT_FORMAT_ITEMS):
+        image_settings.file_format = _OUTPUT_FORMAT_ITEMS[value][0]
+
+
 class OutWitBridgeRuntimeState(PropertyGroup):
     bridge_version: StringProperty(name="Bridge Version", default="")
     bridge_url: StringProperty(name="Bridge Url", default="")
@@ -108,6 +142,14 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         description="Render on any available node instead of a specific group "
                     "(only offered when your account is allowed to)",
         default=False,
+    )
+    output_format: EnumProperty(
+        name="Format",
+        description="Output image format — only the formats the render farm supports. Writes to the "
+                    "scene's Output Properties (File Format)",
+        items=_OUTPUT_FORMAT_ITEMS,
+        get=_output_format_get,
+        set=_output_format_set,
     )
     current_user_display_name: StringProperty(name="Display Name", default="")
     current_user_id: StringProperty(name="User Id", default="")
