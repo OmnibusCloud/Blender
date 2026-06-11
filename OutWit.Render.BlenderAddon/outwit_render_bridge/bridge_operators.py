@@ -805,6 +805,14 @@ def _auto_refresh_job_timer() -> float:
 _lazy_launch_call: AsyncCall | None = None
 _lazy_launch_failed = False
 
+# Bridge PID whose cloud/session state we already pulled. The bridge RESTORES the persisted login
+# by itself at startup, but is_signed_in was only ever written by operator-driven
+# _refresh_bridge_state — so after every Blender restart the panel showed "Not signed in" over a
+# perfectly restored session and users re-logged-in for nothing (live-debugged 2026-06-11: the log
+# showed "Bridge session restored successfully" and ZERO state queries from the addon). The
+# heartbeat now pulls the state once per bridge process as soon as it is reachable.
+_session_state_synced_pid = 0
+
 # Phase 5 persisted render preferences — session latches. The bridge OWNS the storage; we seed the
 # transient props once per Blender session when the bridge becomes reachable (_pump_render_settings),
 # seed the remembered TARGET once when the execution scope is known (_refresh_bridge_state), and
@@ -930,6 +938,28 @@ def _apply_render_settings_seed(context, settings) -> None:
         _applying_settings_seed = False
 
 
+def _pump_session_state_sync(context) -> None:
+    """One-shot per bridge process: pull bridge/session/scope state as soon as the bridge is
+    reachable, so a session the bridge restored at startup (persisted token) becomes visible in
+    the panel without any manual click. Retries every heartbeat until the first success; re-arms
+    automatically when the bridge process changes (relaunch)."""
+    global _session_state_synced_pid
+    state = _get_runtime_state(context)
+    if not state.bridge_is_running or not state.bridge_lease_acquired:
+        return
+
+    pid = int(state.bridge_process_id or 0)
+    if pid <= 0 or pid == _session_state_synced_pid:
+        return
+
+    try:
+        _refresh_bridge_state(context)
+    except Exception:
+        return  # bridge REST still warming up (or no scene in this timer tick) — retry next beat
+
+    _session_state_synced_pid = pid
+
+
 def _pump_render_settings(context) -> None:
     """Seed the UI from the bridge's persisted render preferences (once per Blender session) and
     retry a pending master-toggle push. Quiet best-effort off the heartbeat: the bridge REST may
@@ -1039,6 +1069,7 @@ def _bridge_lease_timer() -> float:
 
     refresh_bridge_process_state(context)
     _pump_lazy_first_start(context)
+    _pump_session_state_sync(context)
     _pump_render_settings(context)
     # Repaint the panel when the connection phase changes (heartbeat-driven; replaces manual Refresh).
     _redraw_on_connection_change(state)
