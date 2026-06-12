@@ -132,7 +132,7 @@ class Blocker:
 # to PNG (_map_render_format's default), so the artist asked for TIFF and got a PNG. We now BLOCK an
 # unsupported format with a clear message instead of producing a quietly-wrong result. Image-producing
 # modes only (Video encodes to a container, so the frame format is intermediate, not the deliverable).
-SUPPORTED_IMAGE_FORMATS = frozenset({"PNG", "OPEN_EXR", "OPEN_EXR_MULTILAYER", "JPEG"})
+SUPPORTED_IMAGE_FORMATS = frozenset({"PNG", "OPEN_EXR", "OPEN_EXR_MULTILAYER", "JPEG", "TIFF", "WEBP"})
 _IMAGE_OUTPUT_MODES = frozenset({"Still", "StillTiled", "Frames"})
 
 
@@ -459,7 +459,7 @@ def _primary_blocker(scene, state) -> Blocker | None:
             and image_format and image_format not in SUPPORTED_IMAGE_FORMATS:
         return Blocker(
             BlockerKind.SWITCH_FORMAT,
-            f"Output format '{image_format}' is not supported — the farm renders PNG, EXR, or JPEG.",
+            f"Output format '{image_format}' is not supported — the farm renders PNG, EXR, JPEG, TIFF, or WebP.",
             "Switch to PNG",
             "outwit.bridge_switch_format_to_png",
         )

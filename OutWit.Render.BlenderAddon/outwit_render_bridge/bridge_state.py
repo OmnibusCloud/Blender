@@ -103,9 +103,11 @@ _OUTPUT_FORMAT_ITEMS = [
     ("PNG", "PNG", "Lossless 8/16-bit image"),
     ("OPEN_EXR", "OpenEXR", "High-dynamic-range / linear float"),
     ("JPEG", "JPEG", "Compressed 8-bit image"),
+    ("TIFF", "TIFF", "Lossless 8/16-bit image (print/archviz pipelines)"),
+    ("WEBP", "WebP", "Modern web image (lossy or lossless)"),
 ]
 # Map a scene file_format string to the curated control's index (EXR multilayer collapses to EXR).
-_OUTPUT_FORMAT_TO_INDEX = {"PNG": 0, "OPEN_EXR": 1, "OPEN_EXR_MULTILAYER": 1, "JPEG": 2}
+_OUTPUT_FORMAT_TO_INDEX = {"PNG": 0, "OPEN_EXR": 1, "OPEN_EXR_MULTILAYER": 1, "JPEG": 2, "TIFF": 3, "WEBP": 4}
 
 # Index of the transient "unsupported" display entry (see _output_format_items).
 _OUTPUT_FORMAT_UNSUPPORTED_INDEX = len(_OUTPUT_FORMAT_ITEMS)
@@ -300,7 +302,20 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     tiles_y: IntProperty(name="Tiles Y", default=2, min=1, update=_mark_render_settings_changed)
     tile_overlap_px: IntProperty(name="Tile Overlap Px", default=8, min=0, update=_mark_render_settings_changed)
     video_frame_rate: IntProperty(name="Video Frame Rate", default=24, min=1)
-    video_constant_rate_factor: IntProperty(name="Video Constant Rate Factor", default=23, min=0)
+    video_constant_rate_factor: IntProperty(name="Video Constant Rate Factor", default=23, min=0, max=51)
+    # Container+codec PRESET (one control instead of two axes — invalid combos unrepresentable).
+    # Bucket 1: persisted on the bridge as the VideoContainer/VideoCodec pair.
+    video_format: EnumProperty(
+        name="Video format",
+        description="Container and codec for the encoded video",
+        items=[
+            ("MP4_H264", "MP4 · H.264", "Universal playback (the default)"),
+            ("MP4_H265", "MP4 · H.265", "Same quality at roughly half the size; needs newer players"),
+            ("WEBM_VP9", "WebM · VP9", "Open web format"),
+        ],
+        default="MP4_H264",
+        update=_mark_render_settings_changed,
+    )
     render_mode: EnumProperty(
         name="Render Mode",
         items=[

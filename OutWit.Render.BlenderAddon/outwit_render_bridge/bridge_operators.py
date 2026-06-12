@@ -50,6 +50,13 @@ from .bridge_state import ALL_CLIENTS_GROUP_ID, NO_GROUP_ID, apply_render_mode_t
 FORMAT_PNG = 0
 FORMAT_EXR = 1
 FORMAT_JPEG = 2
+FORMAT_TIFF = 3
+FORMAT_WEBP = 4
+
+# VideoFormat wire enum (OutWit.Controller.Render.Model.VideoFormat): 0 = Default (legacy MP4/H.264).
+VIDEO_FORMAT_MP4_H264 = 1
+VIDEO_FORMAT_MP4_H265 = 2
+VIDEO_FORMAT_WEBM_VP9 = 3
 
 # RenderColorMode / RenderFilmTransparency / RenderColorDepth — int values mirror the C# enum
 # declaration order in OutWit.Controller.Render.Model. 0 = Default (controller reproduces legacy
@@ -72,13 +79,24 @@ BLEND_MODE_CENTER_PRIORITY_CROP = 0
 
 def _map_render_format(file_format: str) -> int:
     """Maps Blender's image_settings.file_format to the controller's RenderFormat. Unsupported formats
-    fall back to PNG (the controller supports PNG/EXR/JPEG)."""
+    fall back to PNG (compute_status blocks them in the UI before a launch can reach this)."""
     return {
         "PNG": FORMAT_PNG,
         "OPEN_EXR": FORMAT_EXR,
         "OPEN_EXR_MULTILAYER": FORMAT_EXR,
         "JPEG": FORMAT_JPEG,
+        "TIFF": FORMAT_TIFF,
+        "WEBP": FORMAT_WEBP,
     }.get(file_format or "", FORMAT_PNG)
+
+
+def _map_video_format(video_format: str) -> int:
+    """Maps the addon's video preset identifier to the controller's VideoFormat wire enum."""
+    return {
+        "MP4_H264": VIDEO_FORMAT_MP4_H264,
+        "MP4_H265": VIDEO_FORMAT_MP4_H265,
+        "WEBM_VP9": VIDEO_FORMAT_WEBM_VP9,
+    }.get(video_format or "", VIDEO_FORMAT_MP4_H264)
 
 
 def _map_color_mode(color_mode: str) -> int:
@@ -242,6 +260,7 @@ def _collect_video_options(state) -> dict[str, object]:
     return {
         "FrameRate": int(state.video_frame_rate),
         "ConstantRateFactor": int(state.video_constant_rate_factor),
+        "Format": _map_video_format(getattr(state, "video_format", "")),
     }
 
 
@@ -1136,6 +1155,7 @@ def _push_render_settings(context) -> None:
         tiles_y=int(state.tiles_y),
         tile_overlap=int(state.tile_overlap_px),
         anim_result=state.anim_result,
+        video_format=getattr(state, "video_format", ""),
         group_id=group_id,
         group_name=group_name_for(groups, group_id),
     ))

@@ -130,7 +130,8 @@ class SeedPropValuesTests(unittest.TestCase):
 
     def test_maps_bucket_one_values_to_state_props(self):
         settings = RenderSettingsResponse(
-            split_frame=True, tiles_x=4, tiles_y=3, tile_overlap=16, anim_result="Video")
+            split_frame=True, tiles_x=4, tiles_y=3, tile_overlap=16, anim_result="Video",
+            video_container="WEBM", video_codec="VP9")
 
         values = _LOGIC.seed_prop_values(settings)
 
@@ -140,6 +141,7 @@ class SeedPropValuesTests(unittest.TestCase):
             "tiles_y": 3,
             "tile_overlap_px": 16,
             "anim_result": "Video",
+            "video_format": "WEBM_VP9",
         })
 
     def test_sanitizes_corrupt_values_against_prop_constraints(self):
@@ -187,7 +189,7 @@ class GroupNameForTests(unittest.TestCase):
 
 
 class ComposeStickyPayloadTests(unittest.TestCase):
-    def test_overlays_used_values_and_preserves_video_fields(self):
+    def test_overlays_used_values_including_video_preset(self):
         current = RenderSettingsResponse(video_container="MP4", video_codec="H264")
 
         payload = _LOGIC.compose_sticky_payload(
@@ -198,6 +200,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             tiles_y=3,
             tile_overlap=0,
             anim_result="Video",
+            video_format="WEBM_VP9",
             group_id="g-1",
             group_name="Studio GPUs",
         )
@@ -207,9 +210,8 @@ class ComposeStickyPayloadTests(unittest.TestCase):
         self.assertEqual(payload["TilesX"], 4)
         self.assertEqual(payload["TileOverlap"], 0)
         self.assertEqual(payload["AnimResult"], "Video")
-        # No addon UI writes these yet — the sticky write must not erase the stored values.
-        self.assertEqual(payload["VideoContainer"], "MP4")
-        self.assertEqual(payload["VideoCodec"], "H264")
+        self.assertEqual(payload["VideoContainer"], "WEBM")
+        self.assertEqual(payload["VideoCodec"], "VP9")
         self.assertEqual(payload["LastGroupId"], "g-1")
         self.assertEqual(payload["LastGroupName"], "Studio GPUs")
 
@@ -222,12 +224,31 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             tiles_y=2,
             tile_overlap=8,
             anim_result="Sequence",
+            video_format="MP4_H264",
             group_id="",
             group_name="",
         )
 
         self.assertEqual(payload["LastGroupId"], "")
         self.assertEqual(payload["LastGroupName"], "")
+        self.assertEqual(payload["VideoContainer"], "MP4")
+        self.assertEqual(payload["VideoCodec"], "H264")
+
+
+class VideoFormatMappingTests(unittest.TestCase):
+    def test_round_trips_all_presets(self):
+        for preset in ("MP4_H264", "MP4_H265", "WEBM_VP9"):
+            container, codec = _LOGIC.video_store_from_format(preset)
+            self.assertEqual(_LOGIC.video_format_from_store(container, codec), preset)
+
+    def test_legacy_empty_store_falls_back_to_default(self):
+        self.assertEqual(_LOGIC.video_format_from_store("", ""), "MP4_H264")
+
+    def test_unknown_pair_falls_back_to_default(self):
+        self.assertEqual(_LOGIC.video_format_from_store("AVI", "XVID"), "MP4_H264")
+
+    def test_store_lookup_is_case_insensitive(self):
+        self.assertEqual(_LOGIC.video_format_from_store("webm", "vp9"), "WEBM_VP9")
 
 
 class ComposeRememberPayloadTests(unittest.TestCase):

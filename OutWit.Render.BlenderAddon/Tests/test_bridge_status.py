@@ -294,22 +294,23 @@ class OutputAxisMappingTests(unittest.TestCase):
 
 
 class UnsupportedFormatBlockerTests(unittest.TestCase):
-    """The controller honours only PNG/EXR/JPEG; an unsupported output format used to be SILENTLY
-    rendered as PNG. compute_status now blocks it (SWITCH_FORMAT) for image-producing modes."""
+    """The controller honours PNG/EXR/JPEG/TIFF/WebP (TIFF+WebP since Render 1.19.0); an unsupported
+    output format used to be SILENTLY rendered as PNG. compute_status blocks it (SWITCH_FORMAT) for
+    image-producing modes."""
 
     def setUp(self):
         global _DEP_BLOCK, _SIM_BLOCK
         _DEP_BLOCK = ""
         _SIM_BLOCK = ""
 
-    def test_tiff_blocks_in_image_mode(self):
-        view = status.compute_status(make_scene(file_format="TIFF"), make_state(render_mode="Still"))
+    def test_targa_blocks_in_image_mode(self):
+        view = status.compute_status(make_scene(file_format="TARGA"), make_state(render_mode="Still"))
         self.assertEqual(view.phase, status.Phase.BLOCKED)
         self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT)
         self.assertFalse(view.is_ready)
 
     def test_supported_formats_do_not_block(self):
-        for fmt in ("PNG", "OPEN_EXR", "OPEN_EXR_MULTILAYER", "JPEG"):
+        for fmt in ("PNG", "OPEN_EXR", "OPEN_EXR_MULTILAYER", "JPEG", "TIFF", "WEBP"):
             view = status.compute_status(make_scene(file_format=fmt), make_state(render_mode="Still"))
             self.assertNotEqual(view.blocker.kind if view.blocker else status.BlockerKind.NONE,
                                 status.BlockerKind.SWITCH_FORMAT, fmt)
@@ -362,7 +363,7 @@ class SwitchFormatBlockerTests(unittest.TestCase):
         _SIM_BLOCK = ""
 
     def test_unsupported_format_blocks_with_png_fix(self):
-        view = status.compute_status(make_scene(file_format="TIFF"), make_state())
+        view = status.compute_status(make_scene(file_format="TARGA"), make_state())
         self.assertEqual(view.phase, status.Phase.BLOCKED)
         self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT)
         self.assertTrue(view.blocker.has_fix, "the format blocker must carry a one-click fix")
@@ -400,7 +401,7 @@ class WrapMessageTests(unittest.TestCase):
         self.assertEqual(status.wrap_message("All good", 40), ["All good"])
 
     def test_long_text_wraps_to_multiple_full_lines(self):
-        text = "Output format 'TIFF' is not supported — the farm renders PNG, EXR, or JPEG."
+        text = "Output format 'TARGA' is not supported — the farm renders PNG, EXR, or JPEG."
         lines = status.wrap_message(text, 30)
         self.assertGreater(len(lines), 1)
         self.assertEqual(" ".join(lines), text)

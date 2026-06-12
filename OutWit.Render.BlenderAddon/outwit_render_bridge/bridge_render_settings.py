@@ -19,6 +19,26 @@ from .bridge_models import RenderSettingsResponse
 
 _ANIM_RESULTS = {"Sequence", "Video"}
 
+# Video preset identifier (the bpy EnumProperty) <-> the stored Container/Codec pair (bucket 1).
+_VIDEO_FORMAT_TO_STORE = {
+    "MP4_H264": ("MP4", "H264"),
+    "MP4_H265": ("MP4", "H265"),
+    "WEBM_VP9": ("WEBM", "VP9"),
+}
+_STORE_TO_VIDEO_FORMAT = {pair: preset for preset, pair in _VIDEO_FORMAT_TO_STORE.items()}
+_DEFAULT_VIDEO_FORMAT = "MP4_H264"
+
+
+def video_format_from_store(container: str, codec: str) -> str:
+    """The preset identifier for a stored container/codec pair; unknown/legacy-empty pairs fall
+    back to the default (MP4/H.264 — the farm's legacy behaviour)."""
+    return _STORE_TO_VIDEO_FORMAT.get(((container or "").upper(), (codec or "").upper()), _DEFAULT_VIDEO_FORMAT)
+
+
+def video_store_from_format(video_format: str) -> tuple[str, str]:
+    """The container/codec pair persisted for a preset identifier."""
+    return _VIDEO_FORMAT_TO_STORE.get(video_format or "", _VIDEO_FORMAT_TO_STORE[_DEFAULT_VIDEO_FORMAT])
+
 
 def seed_prop_values(settings: RenderSettingsResponse) -> dict[str, Any]:
     """The bucket-1 runtime-state props to apply on seed; empty when the master toggle is off.
@@ -36,6 +56,7 @@ def seed_prop_values(settings: RenderSettingsResponse) -> dict[str, Any]:
         "tiles_y": max(1, int(settings.tiles_y)),
         "tile_overlap_px": max(0, int(settings.tile_overlap)),
         "anim_result": anim_result,
+        "video_format": video_format_from_store(settings.video_container, settings.video_codec),
     }
 
 
@@ -87,12 +108,14 @@ def compose_sticky_payload(
     tiles_y: int,
     tile_overlap: int,
     anim_result: str,
+    video_format: str,
     group_id: str,
     group_name: str,
 ) -> dict[str, Any]:
-    """Read-modify-write: overlay the addon-owned bucket-1 values on the bridge's CURRENT snapshot,
-    preserving fields the addon has no UI for yet (video container/codec). ``remember`` comes from
-    the live UI toggle — the authoritative intent even if a previous toggle push is still pending."""
+    """Read-modify-write: overlay the addon-owned bucket-1 values on the bridge's CURRENT snapshot.
+    ``remember`` comes from the live UI toggle — the authoritative intent even if a previous toggle
+    push is still pending."""
+    container, codec = video_store_from_format(video_format)
     payload = current.to_payload()
     payload.update({
         "RememberRenderSettings": bool(remember),
@@ -101,6 +124,8 @@ def compose_sticky_payload(
         "TilesY": int(tiles_y),
         "TileOverlap": int(tile_overlap),
         "AnimResult": anim_result or "",
+        "VideoContainer": container,
+        "VideoCodec": codec,
         "LastGroupId": group_id or "",
         "LastGroupName": group_name or "",
     })
