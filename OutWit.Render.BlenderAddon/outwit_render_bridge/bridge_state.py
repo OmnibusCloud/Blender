@@ -145,6 +145,22 @@ def _output_format_items(self, context):
     return _OUTPUT_FORMAT_ITEMS_CACHE
 
 
+# The still Frame is bucket 2 ("derive from the scene, don't store"): it binds to the scene's
+# current frame, so it persists in the .blend and survives restarts with the file — an unbound
+# IntProperty reset to 1 every session and read as "my Frame is not saved".
+def _still_frame_get(self) -> int:
+    scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return 1
+    return max(1, int(getattr(scene, "frame_current", 1) or 1))
+
+
+def _still_frame_set(self, value: int) -> None:
+    scene = getattr(bpy.context, "scene", None)
+    if scene is not None:
+        scene.frame_current = max(1, int(value))
+
+
 def _output_format_get(self) -> int:
     fmt = _scene_file_format()
     if not fmt:
@@ -256,7 +272,14 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     preflight_video_warning_summary: StringProperty(name="Preflight Video Warning Summary", default="")
     preflight_issue_summary: StringProperty(name="Preflight Issue Summary", default="")
     preflight_warning_summary: StringProperty(name="Preflight Warning Summary", default="")
-    still_frame: IntProperty(name="Still Frame", default=1, min=1)
+    still_frame: IntProperty(
+        name="Still Frame",
+        description="The frame to render — the scene's current frame (stored in the .blend)",
+        default=1,
+        min=1,
+        get=_still_frame_get,
+        set=_still_frame_set,
+    )
     tiles_x: IntProperty(name="Tiles X", default=2, min=1, update=_mark_render_settings_changed)
     tiles_y: IntProperty(name="Tiles Y", default=2, min=1, update=_mark_render_settings_changed)
     tile_overlap_px: IntProperty(name="Tile Overlap Px", default=8, min=0, update=_mark_render_settings_changed)

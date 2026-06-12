@@ -253,6 +253,14 @@ def _dependency_plan_block_message(state) -> str:
 # region Main-flow draw (single source: compute_status)
 
 
+def _scene_is_dirty() -> bool:
+    """LIVE unsaved-changes check. state.current_blend_is_dirty is a snapshot taken at the
+    one-shot state sync — changing the format/frame AFTER it left the flag stale False, so the
+    Save-scene button never appeared and the user could not persist the change into the .blend
+    (the format then 'reverted' on the next Blender start)."""
+    return bool(getattr(bpy.data, "is_dirty", False))
+
+
 def _addon_version_text() -> str:
     """The installed addon version from bl_info (package __init__), e.g. '0.10.0'."""
     try:
@@ -444,16 +452,18 @@ def _draw_render_setup(layout, context, state, view) -> None:
     # One status line + one actionable blocker, from compute_status (replaces the Engine/Scene/Mode matrix).
     _draw_status(layout, context, view)
 
-    # Settings changes routinely dirty the scene (format/range live in the .blend) and a dirty scene
-    # blocks Render — give the save right here, above the button (design: Save scene over Render).
-    if state.current_blend_is_dirty:
+    # Settings changes routinely dirty the scene (format/frame/range live in the .blend) and a dirty
+    # scene blocks Render — give the save right here, above the button (design: Save scene over
+    # Render). MUST be the live flag: the state snapshot goes stale the moment the user edits.
+    scene_dirty = _scene_is_dirty()
+    if scene_dirty:
         layout.label(text="Unsaved changes", icon="ERROR")
         save_row = layout.row()
         save_row.scale_y = 1.2
         save_row.operator("wm.save_mainfile", text="Save scene", icon="FILE_TICK")
 
     render_row = layout.row()
-    render_row.enabled = view.is_ready and not state.current_blend_is_dirty
+    render_row.enabled = view.is_ready and not scene_dirty
     render_row.scale_y = 1.6
     render_row.operator("outwit.bridge_launch_render", text="Render", icon="RENDER_STILL")
 
@@ -677,7 +687,7 @@ class OUTWIT_PT_bridge_scene_panel(Panel):
         state = _get_runtime_state(context)
 
         layout.label(text=f"File: {_blend_basename(state)}")
-        if state.current_blend_is_dirty:
+        if _scene_is_dirty():
             layout.label(text="Unsaved changes", icon="ERROR")
         layout.label(text=f"Frames: {state.scene_frame_start}-{state.scene_frame_end}   Camera: {state.scene_camera_name or 'None'}")
         layout.label(text=f"Engine: {state.scene_engine_family or 'Unknown'}   Format: {state.render_file_format or '—'}")

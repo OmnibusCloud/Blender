@@ -847,6 +847,9 @@ def _connection_signature(state) -> tuple:
         getattr(state, "bridge_launch_message", ""),
         getattr(state, "last_error", ""),
         getattr(state, "active_job_status", ""),
+        # The Save-scene button is gated on the LIVE dirty flag — repaint when it flips so the
+        # button appears/disappears without waiting for a mouse-over.
+        bool(getattr(bpy.data, "is_dirty", False)),
     )
 
 
