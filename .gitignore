@@ -66,6 +66,9 @@ artifacts/
 @Output/
 dist/
 
+# Internal working docs/plans live locally only — this is a public repo.
+@Archive/
+
 # Local-only test fixtures: large .blend scenes, golden renders,
 # blender / ffmpeg runtime binaries. Tests `Assert.Ignore` when
 # these are missing — CI stays green, but a local dev with these
