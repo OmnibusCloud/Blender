@@ -191,5 +191,42 @@ if (Test-Path $zipPath)
     Remove-Item $zipPath -Force
 }
 
-Compress-Archive -Path (Join-Path $stagingVariantRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
+# Compress-Archive (System.IO.Compression) never stores unix mode bits, so a bridge binary
+# extracted on macOS/Linux would not be executable. When packing a unix target on a unix host
+# (CI), chmod the staged apphost and pack with the native `zip`, which preserves the bit.
+# Windows-hosted builds of unix targets keep the Compress-Archive fallback for dev convenience —
+# those zips are NOT release-grade.
+$isUnixTarget = $RuntimeIdentifier -notlike 'win-*'
+$onWindows = [System.IO.Path]::DirectorySeparatorChar -eq [char]'\'
+$nativeZip = if ($isUnixTarget -and -not $onWindows) { Get-Command zip -ErrorAction SilentlyContinue } else { $null }
+
+if ($nativeZip)
+{
+    Get-ChildItem -Path $stagingBridgeRoot -File -Recurse |
+        Where-Object { $_.Name -eq 'OutWit.Render.BlenderBridge' } |
+        ForEach-Object { & chmod +x $_.FullName }
+
+    Push-Location $stagingVariantRoot
+    try
+    {
+        & zip -qry $zipPath .
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Native zip failed for $zipPath"
+        }
+    }
+    finally
+    {
+        Pop-Location
+    }
+}
+else
+{
+    if ($isUnixTarget)
+    {
+        Write-Warning "Packing a unix target without the native 'zip' tool: the bridge executable bit will NOT be stored in the archive. Release packages must be built on a unix host."
+    }
+    Compress-Archive -Path (Join-Path $stagingVariantRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
+}
+
 Write-Output "Created Blender addon package: $zipPath"

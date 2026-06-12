@@ -1,17 +1,33 @@
 name: addon
 
-# Builds the per-platform Blender addon packages (self-contained bridge bundled) and attaches
-# them to the GitHub Release. Triggered by an `addon-v*` tag; can also be run manually.
+# Builds the per-platform Blender addon packages (self-contained bridge bundled), signs the macOS
+# bridge binary, and attaches everything to the GitHub Release. Triggered by an `addon-v*` tag; can
+# also be run manually.
 #
 # All three RIDs are cross-published from a single Linux runner. This is deliberate: the bridge weaves
 # aspects with AspectInjector at build time, and its osx-arm64 native tool gets SIGKILL'd by Gatekeeper
 # on the macOS runner. On Linux the (managed) weaving runs with the Linux tool and `dotnet publish -r
 # <rid>` still produces a working self-contained build for every target. Ships the SELF-CONTAINED
-# variant (no .NET prerequisite for artists). macOS code-signing/notarization is a separate production
-# step (see signing strategy); unsigned is fine for debug builds.
+# variant (no .NET prerequisite for artists).
 #
-# Not yet automated here (see docs/addon-packaging-and-distribution.md §4): regenerating + publishing
-# the extension repository index.json for in-Blender auto-update — that needs the HTTPS host decided.
+# SIGNING (mirrors the WitCloud client-release pipeline; same secret names):
+# - macOS: a dedicated macos-latest job codesigns the bundled bridge Mach-O (Developer ID
+#   Application, hardened runtime + .NET entitlements) and notarizes the addon zip with notarytool.
+#   A bare executable cannot be STAPLED (only .app/.dmg/.pkg can) — Gatekeeper validates the
+#   notarization ticket online, which is the standard path for CLI binaries shipped in zips.
+#   Required repo secrets: APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_ID,
+#   APPLE_APP_PASSWORD, APPLE_TEAM_ID. The job degrades to a no-op (with a warning) until they
+#   are configured, so unsigned debug releases keep working.
+# - Windows: PLACEHOLDER — the SSL.com IV certificate has not been issued yet. When it arrives,
+#   add an eSigner CodeSignTool step over outwit_render_bridge/bridge/win-x64/self-contained/
+#   OutWit.Render.BlenderBridge.exe before the win zip is attached (see the client pipeline for
+#   the secret plumbing pattern).
+# - Linux: no per-binary signing (per the signing strategy); the release ships SHA256SUMS and a
+#   detached GPG signature when GPG_PRIVATE_KEY/GPG_PASSPHRASE are configured.
+#
+# Not yet automated (see @Archive/docs/addon-packaging-and-distribution.md §4): regenerating +
+# publishing the extension repository index.json for in-Blender auto-update — that lands with the
+# portal (the index/zips will be hosted there).
 
 on:
   push:
@@ -40,6 +56,24 @@ jobs:
         shell: pwsh
         run: ./OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1 -RuntimeIdentifier ${{ matrix.rid }} -DeploymentMode SelfContained
 
+      # Guards two packaging invariants: blender_manifest.toml must sit at the zip ROOT (Blender's
+      # extension installer requirement), and unix bridges must carry the executable bit (native
+      # zip path in the build script; Compress-Archive would silently drop it).
+      - name: Verify package layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP=$(ls OutWit.Render.BlenderAddon/dist/*.zip | head -1)
+          unzip -l "$ZIP" | sed -n '1,12p'
+          unzip -l "$ZIP" | awk '{print $4}' | grep -qx 'blender_manifest.toml' \
+            || { echo "::error::blender_manifest.toml is not at the zip root"; exit 1; }
+          if [ "${{ matrix.rid }}" != "win-x64" ]; then
+            INFO=$(zipinfo "$ZIP" | grep 'OutWit.Render.BlenderBridge$' || true)
+            echo "$INFO"
+            echo "$INFO" | grep -q '^-rwx' \
+              || { echo "::error::bridge binary is not executable inside the package"; exit 1; }
+          fi
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -47,8 +81,121 @@ jobs:
           path: OutWit.Render.BlenderAddon/dist/*.zip
           if-no-files-found: error
 
-  release:
+  sign-macos:
+    name: sign + notarize macOS bridge
     needs: build
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: addon-osx-arm64
+          path: stage
+
+      # Secrets are not available in job-level `if`, so gate inside the job: without the Apple
+      # credentials this job is a no-op and the unsigned zip ships as-is (debug-friendly).
+      - name: Check signing credentials
+        id: gate
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+        run: |
+          if [ -z "${APPLE_CERT_P12_BASE64:-}" ]; then
+            echo "::warning::APPLE_CERT_P12_BASE64 not configured — shipping the macOS package UNSIGNED. Add APPLE_CERT_P12_BASE64/APPLE_CERT_PASSWORD/APPLE_ID/APPLE_APP_PASSWORD/APPLE_TEAM_ID to sign+notarize."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign the bridge binary
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ZIP=$(ls stage/*.zip | head -1)
+          echo "Package: $ZIP"
+          WORK="$RUNNER_TEMP/addon"; rm -rf "$WORK"; mkdir -p "$WORK"
+          unzip -q "$ZIP" -d "$WORK"
+
+          BRIDGE=$(find "$WORK" -type f -name 'OutWit.Render.BlenderBridge' -path '*osx-arm64*' | head -1)
+          if [ -z "$BRIDGE" ]; then
+            echo "::error::bridge binary not found inside the package"; exit 1
+          fi
+          echo "Bridge binary: $BRIDGE"
+          # Belt-and-braces: the build job stores the exec bit via native zip, but make sure the
+          # re-packed archive always ships a runnable binary.
+          chmod +x "$BRIDGE"
+
+          # Temp keychain with the Developer ID Application cert (client-release pattern).
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/apple_cert.p12"
+          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security import "$RUNNER_TEMP/apple_cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          DEVID=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/{print $2; exit}')
+          echo "Signing identity: $DEVID"
+
+          # .NET hardened-runtime entitlements (the bridge JITs, talks to the cloud over HTTPS and
+          # binds the loopback REST server).
+          ENT="$RUNNER_TEMP/entitlements.plist"
+          cat > "$ENT" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>com.apple.security.cs.allow-jit</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+            <key>com.apple.security.network.client</key><true/>
+            <key>com.apple.security.network.server</key><true/>
+          </dict></plist>
+          PLIST
+
+          codesign --force --timestamp --options runtime --entitlements "$ENT" --sign "$DEVID" "$BRIDGE"
+          codesign --verify --strict --verbose=2 "$BRIDGE"
+
+          # Re-zip with the original name and the original internal layout.
+          NAME=$(basename "$ZIP")
+          (cd "$WORK" && zip -qry "$RUNNER_TEMP/$NAME" .)
+          mv "$RUNNER_TEMP/$NAME" "$ZIP"
+          echo "ZIP_PATH=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Notarize the package
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          echo "Submitting $ZIP_PATH to the Apple notary service (waits for the result)..."
+          SUBMIT_OUT=$(xcrun notarytool submit "$ZIP_PATH" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait 2>&1) || true
+          echo "$SUBMIT_OUT"
+
+          SUB_ID=$(echo "$SUBMIT_OUT" | awk '/id:/{print $2; exit}')
+          if ! echo "$SUBMIT_OUT" | grep -q "status: Accepted"; then
+            echo "::error::Notarization not accepted (id=$SUB_ID). Fetching the detailed log:"
+            xcrun notarytool log "$SUB_ID" \
+              --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+            exit 1
+          fi
+          # A bare binary in a zip cannot be stapled — Gatekeeper validates the ticket online.
+
+      - name: Upload signed package
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-osx-arm64
+          path: stage/*.zip
+          overwrite: true
+          if-no-files-found: error
+
+  release:
+    needs: [build, sign-macos]
     if: startsWith(github.ref, 'refs/tags/addon-v')
     runs-on: ubuntu-latest
     steps:
@@ -56,7 +203,32 @@ jobs:
         with:
           path: artifacts
 
-      - name: Attach addon zips to the release
+      # A single SHA256SUMS over every package + a detached GPG signature when the key is
+      # configured (same trust mechanism as the client release; verify with
+      # `gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS`).
+      - name: SHA256SUMS + GPG signature
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f -name '*.zip' -exec cp {} release/ \;
+          cd release
+          sha256sum *.zip > SHA256SUMS
+          echo "=== SHA256SUMS ==="; cat SHA256SUMS
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "::warning::GPG_PRIVATE_KEY secret not set — shipping SHA256SUMS WITHOUT a signature."
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE:-}" \
+            --detach-sign --armor -o SHA256SUMS.asc SHA256SUMS
+          echo "=== signed ==="; ls -la SHA256SUMS*
+
+      - name: Attach addon packages to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: release/*
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-rc') }}
