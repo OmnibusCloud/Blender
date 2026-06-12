@@ -1868,6 +1868,18 @@ class OUTWIT_OT_bridge_refresh_job(Operator):
             return {"CANCELLED"}
 
 
+def invalidate_preflight_results() -> None:
+    """Clears the STORED preflight verdicts (called from bridge_state prop update callbacks via
+    late import). Verdicts are valid only for the inputs they were computed with — a stale
+    'Blocked' would otherwise gate Render with no way to recompute, because only a launch re-runs
+    the checks and the gate prevents launching."""
+    context = getattr(bpy, "context", None)
+    state = getattr(getattr(context, "window_manager", None), "outwit_bridge_state", None)
+    if state is None:
+        return
+    _reset_preflight_state(state)
+
+
 def _reset_preflight_state(state) -> None:
     state.preflight_status = ""
     state.preflight_message = ""
@@ -2056,6 +2068,8 @@ class OUTWIT_OT_bridge_switch_format_to_png(Operator):
             return {"CANCELLED"}
 
         image_settings.file_format = "PNG"
+        # The format is a preflight input — drop verdicts computed for the old format.
+        invalidate_preflight_results()
         self.report({"INFO"}, "Output format set to PNG.")
         return {"FINISHED"}
 

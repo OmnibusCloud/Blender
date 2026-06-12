@@ -76,9 +76,34 @@ def _mark_render_settings_changed(self, context) -> None:
         pass
 
 
+def _invalidate_preflight(self, context) -> None:
+    """Stored preflight verdicts are computed FOR specific inputs (mode, format, tiles, frame,
+    video options) — any input change makes them stale. A stale 'Blocked' verdict otherwise keeps
+    the Render gate shut with no way to recompute: only a launch re-runs the checks, and the gate
+    prevents launching (live finding 2026-06-12: tiled+WebP block survived switching back to PNG).
+    Design rule: never keep verdicts whose inputs changed."""
+    try:
+        from . import bridge_operators
+
+        bridge_operators.invalidate_preflight_results()
+    except Exception:
+        pass
+
+
 def _sync_render_mode_and_persist(self, context) -> None:
     _sync_render_mode(self, context)
     _mark_render_settings_changed(self, context)
+    _invalidate_preflight(self, context)
+
+
+def _mark_render_settings_changed_and_invalidate(self, context) -> None:
+    _mark_render_settings_changed(self, context)
+    _invalidate_preflight(self, context)
+
+
+def _mark_scene_modified_and_invalidate(self, context) -> None:
+    _mark_scene_modified(self, context)
+    _invalidate_preflight(self, context)
 
 
 def apply_render_mode_to_axes(state) -> None:
@@ -233,7 +258,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         items=_output_format_items,
         get=_output_format_get,
         set=_output_format_set,
-        update=_mark_scene_modified,
+        update=_mark_scene_modified_and_invalidate,
     )
     current_user_display_name: StringProperty(name="Display Name", default="")
     current_user_id: StringProperty(name="User Id", default="")
@@ -296,13 +321,13 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         min=1,
         get=_still_frame_get,
         set=_still_frame_set,
-        update=_mark_scene_modified,
+        update=_mark_scene_modified_and_invalidate,
     )
-    tiles_x: IntProperty(name="Tiles X", default=2, min=1, update=_mark_render_settings_changed)
-    tiles_y: IntProperty(name="Tiles Y", default=2, min=1, update=_mark_render_settings_changed)
-    tile_overlap_px: IntProperty(name="Tile Overlap Px", default=8, min=0, update=_mark_render_settings_changed)
-    video_frame_rate: IntProperty(name="Video Frame Rate", default=24, min=1)
-    video_constant_rate_factor: IntProperty(name="Video Constant Rate Factor", default=23, min=0, max=51)
+    tiles_x: IntProperty(name="Tiles X", default=2, min=1, update=_mark_render_settings_changed_and_invalidate)
+    tiles_y: IntProperty(name="Tiles Y", default=2, min=1, update=_mark_render_settings_changed_and_invalidate)
+    tile_overlap_px: IntProperty(name="Tile Overlap Px", default=8, min=0, update=_mark_render_settings_changed_and_invalidate)
+    video_frame_rate: IntProperty(name="Video Frame Rate", default=24, min=1, update=_invalidate_preflight)
+    video_constant_rate_factor: IntProperty(name="Video Constant Rate Factor", default=23, min=0, max=51, update=_invalidate_preflight)
     # Container+codec PRESET (one control instead of two axes — invalid combos unrepresentable).
     # Bucket 1: persisted on the bridge as the VideoContainer/VideoCodec pair.
     video_format: EnumProperty(
@@ -318,7 +343,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
              "Keeps the alpha channel for transparent video (fixed quality — CRF does not apply)"),
         ],
         default="MP4_H264",
-        update=_mark_render_settings_changed,
+        update=_mark_render_settings_changed_and_invalidate,
     )
     render_mode: EnumProperty(
         name="Render Mode",
