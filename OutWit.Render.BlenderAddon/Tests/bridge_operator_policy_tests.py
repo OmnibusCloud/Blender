@@ -242,9 +242,27 @@ def _create_state() -> SimpleNamespace:
 def _create_context(state: SimpleNamespace) -> SimpleNamespace:
     return SimpleNamespace(
         scene=SimpleNamespace(frame_start=1, frame_end=3),
-        window_manager=SimpleNamespace(outwit_bridge_state=state),
+        window=None,
+        window_manager=SimpleNamespace(
+            outwit_bridge_state=state,
+            event_timer_add=lambda *args, **kwargs: object(),
+            event_timer_remove=lambda timer: None,
+            modal_handler_add=lambda operator: None,
+        ),
         preferences=SimpleNamespace(addons={PACKAGE_NAME: SimpleNamespace(preferences=SimpleNamespace(bridge_context_directory="context-dir"))}),
     )
+
+
+def _run_launch_operator(operator, context):
+    """Drive the launch operator like Blender does: execute() may defer the fast tail to a modal
+    TIMER tick (instant-feedback repaint) — pump modal until a terminal result."""
+    result = operator.execute(context)
+    guard = 0
+    while "RUNNING_MODAL" in result:
+        guard += 1
+        assert guard < 10, "launch operator did not terminate"
+        result = operator.modal(context, SimpleNamespace(type="TIMER"))
+    return result
 
 
 def _create_validate_response() -> SimpleNamespace:
@@ -1095,7 +1113,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("Current v1 policy blocks scenes with unresolved external dependencies", state.status_message)
@@ -1119,7 +1137,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("unresolved external cache dependencies", state.status_message)
@@ -1151,7 +1169,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_selected_launch = lambda _context: launch_response
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"FINISHED"}, result)
         self.assertEqual("Still render launched.", state.status_message)
@@ -1175,7 +1193,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("fluid simulations that depend on external cache directories", state.status_message)
@@ -1199,7 +1217,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("require baked data before remote rendering", state.status_message)
@@ -1223,7 +1241,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("require baked mesh cache before remote rendering", state.status_message)
@@ -1247,7 +1265,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
@@ -1271,7 +1289,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
@@ -1295,7 +1313,7 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         bridge_operators._run_validate_blend = run_validate_blend
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = operator.execute(context)
+        result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
         self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)

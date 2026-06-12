@@ -1633,7 +1633,11 @@ class OUTWIT_OT_bridge_use_recommended_mode(Operator):
 
 # Above this many frames, a Frames/Video launch asks for confirmation (a wide default .blend range can
 # otherwise kick off thousands of frames across the crowd by accident).
-_LARGE_FRAME_CONFIRM_THRESHOLD = 50
+# Picking Video/Frames already implies "many frames" — the dialog is NOT for normal animations
+# (a 200-frame shot was getting nagged at the old threshold of 50). It exists for one accident:
+# an untouched default range (e.g. 1-10000) silently burning the crowd's compute. Cancel exists,
+# but a cancelled batch still costs other people's machines real work.
+_LARGE_FRAME_CONFIRM_THRESHOLD = 500
 
 
 class OUTWIT_OT_bridge_launch_render(Operator):
@@ -1646,6 +1650,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
     _blend_path = ""
     _output_signature = ""
     _pending_frame_count = 0
+    _pending_tail = False
 
     def invoke(self, context, event):
         state = _get_runtime_state(context)
@@ -1682,9 +1687,12 @@ class OUTWIT_OT_bridge_launch_render(Operator):
 
         self._output_signature = scene_output_signature(context.scene)
         if not _scene_requires_upload(state, self._blend_path, self._output_signature):
-            # Scene already uploaded — just run the fast tail (validate -> preflight -> submit).
+            # Scene already uploaded — run the fast tail (validate -> preflight -> submit), but
+            # DEFERRED by one modal tick: the tail's cloud round-trips block the UI thread for a
+            # second or two, and running them inside execute() froze the panel with zero feedback
+            # ("did my click do anything?"). One tick lets Blender repaint the status line first.
             state.current_blend_path = self._blend_path
-            return self._finish_launch(context)
+            return self._begin_deferred_tail(context, ensure_modal=True)
 
         try:
             planned_attachments = collect_scene_attachment_metadata()
@@ -1709,15 +1717,27 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
-        if event.type != "TIMER" or self._task is None or not self._task.done:
+        if event.type != "TIMER":
             return {"PASS_THROUGH"}
 
         global _launch_in_progress
         state = _get_runtime_state(context)
+
+        # The deferred fast tail: queued by _begin_deferred_tail so Blender repaints the status
+        # line before the blocking cloud round-trips run.
+        if self._pending_tail:
+            self._pending_tail = False
+            self._cleanup(context)
+            return self._finish_launch(context)
+
+        if self._task is None or not self._task.done:
+            return {"PASS_THROUGH"}
+
         task = self._task
-        self._cleanup(context)  # removes the timer and clears self._task — read `task` after this
+        self._task = None  # consumed; the timer stays alive for the deferred-tail tick
 
         if task.error is not None:
+            self._cleanup(context)
             _launch_in_progress = False
             message = str(task.error)
             state.last_error = message
@@ -1729,13 +1749,30 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         try:
             _apply_upload_result(state, self._blend_path, self._output_signature, task.result)
         except Exception as ex:
+            self._cleanup(context)
             _launch_in_progress = False
             state.last_error = str(ex)
             state.status_message = "Upload post-processing failed."
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
 
-        return self._finish_launch(context)
+        # Repaint between "upload finished" and the blocking tail, for the same reason as above.
+        return self._begin_deferred_tail(context, ensure_modal=False)
+
+    def _begin_deferred_tail(self, context, ensure_modal):
+        """Queue the fast tail for the NEXT modal tick. ensure_modal=True when called from
+        execute() (no timer/handler yet); False when already inside our modal loop."""
+        global _launch_in_progress
+        _launch_in_progress = True
+        state = _get_runtime_state(context)
+        state.last_error = ""
+        state.status_message = "Validating & submitting..."
+        self._pending_tail = True
+        if ensure_modal:
+            self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
+            context.window_manager.modal_handler_add(self)
+        _tag_job_areas_redraw()
+        return {"RUNNING_MODAL"}
 
     def _cleanup(self, context):
         if self._timer is not None:
