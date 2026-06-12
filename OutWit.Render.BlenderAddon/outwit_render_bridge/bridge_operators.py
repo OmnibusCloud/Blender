@@ -1730,6 +1730,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         context_directory = _get_context_directory(context)
 
         _launch_in_progress = True
+        state.launch_in_progress = True
         state.last_error = ""
         state.status_message = "Uploading scene..."
         self._task = AsyncCall(
@@ -1763,6 +1764,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         if task.error is not None:
             self._cleanup(context)
             _launch_in_progress = False
+            state.launch_in_progress = False
             message = str(task.error)
             state.last_error = message
             state.status_message = f"Upload failed: {message}"
@@ -1775,6 +1777,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         except Exception as ex:
             self._cleanup(context)
             _launch_in_progress = False
+            state.launch_in_progress = False
             state.last_error = str(ex)
             state.status_message = "Upload post-processing failed."
             self.report({"ERROR"}, str(ex))
@@ -1789,6 +1792,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         global _launch_in_progress
         _launch_in_progress = True
         state = _get_runtime_state(context)
+        state.launch_in_progress = True
         state.last_error = ""
         state.status_message = "Validating & submitting..."
         self._pending_tail = True
@@ -1846,6 +1850,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             return {"CANCELLED"}
         finally:
             _launch_in_progress = False
+            state.launch_in_progress = False
 
 
 class OUTWIT_OT_bridge_refresh_job(Operator):

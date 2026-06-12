@@ -232,6 +232,21 @@ class ComputeStatusTests(unittest.TestCase):
             active_job_id="j1", active_job_status="Failed", active_job_error="Blob download failed"))
         self.assertEqual(view.phase, status.Phase.FAILED)
 
+    def test_launch_in_progress_is_submitting_and_not_ready(self):
+        # A Render click must flip the panel IMMEDIATELY (live finding 2026-06-12: READY + active
+        # button persisted for 1-2s until the server answered — re-clicks looked possible).
+        view = status.compute_status(make_scene(), make_state(
+            launch_in_progress=True, status_message="Validating & submitting..."))
+        self.assertEqual(view.phase, status.Phase.SUBMITTING)
+        self.assertFalse(view.is_ready)
+        self.assertTrue(view.is_active_job)
+        self.assertEqual(view.status_line, "Validating & submitting...")
+
+    def test_server_job_phase_takes_precedence_over_launch_flag(self):
+        view = status.compute_status(make_scene(), make_state(
+            launch_in_progress=True, active_job_id="j1", active_job_status="Processing"))
+        self.assertEqual(view.phase, status.Phase.RUNNING)
+
     def test_active_job_takes_precedence_over_connection(self):
         # Even if the connection flags look off, an active job's phase wins (it came from the bridge).
         view = status.compute_status(make_scene(), make_state(

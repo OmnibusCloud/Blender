@@ -499,9 +499,11 @@ def _draw_job_lifecycle(layout, state, view) -> None:
     _draw_job_progress(layout, state)
 
     cancel = layout.row()
-    # Cancel only while still running; once Cancel is clicked we are in CANCELLING and the button is
+    # Cancel only while a server job exists and is still running; during the local SUBMITTING phase
+    # there is no job id yet, and once Cancel is clicked we are in CANCELLING and the button is
     # disabled ("finishing current task…" comes from the status line above).
-    cancel.enabled = view.phase != Phase.CANCELLING and not state.active_job_is_completed
+    cancel.enabled = bool(state.active_job_id) \
+        and view.phase != Phase.CANCELLING and not state.active_job_is_completed
     cancel.operator("outwit.bridge_cancel_job", text="Cancel", icon="CANCEL")
 
 

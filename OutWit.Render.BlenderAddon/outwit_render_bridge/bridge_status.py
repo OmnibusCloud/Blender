@@ -576,12 +576,25 @@ def _job_status_view(state, phase: Phase) -> StatusView:
 def compute_status(scene, state) -> StatusView:
     """The one function the panel and operators call. Precedence:
       1. an active/terminal job → its server-sourced phase;
-      2. otherwise the connection/auth ladder;
-      3. otherwise Ready, or a single typed blocker.
+      2. a launch in flight (upload/validate/preflight/submit) → local SUBMITTING;
+      3. otherwise the connection/auth ladder;
+      4. otherwise Ready, or a single typed blocker.
     """
     job_phase = _job_phase(state)
     if job_phase is not None:
         return _job_status_view(state, job_phase)
+
+    # A click on Render starts upload + cloud checks BEFORE a job id exists. Without a local
+    # transitional phase the panel kept showing READY (active Render button, no reaction at all)
+    # until the submit answered 1-2s later — the user could keep clicking. SUBMITTING flips the
+    # panel into the lifecycle view immediately; the live progress text is in status_message.
+    if getattr(state, "launch_in_progress", False):
+        return StatusView(
+            Phase.SUBMITTING,
+            getattr(state, "status_message", "") or "Submitting render...",
+            "SORTTIME",
+            diagnostics=_diagnostics(state),
+        )
 
     connection = _connection_phase(state)
     if connection != Phase.READY:

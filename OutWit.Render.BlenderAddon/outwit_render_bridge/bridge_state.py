@@ -382,6 +382,9 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         default="Sequence",
         update=_sync_render_mode_and_persist,
     )
+    # A Render click is in flight (upload/validate/preflight/submit — no job id yet). Drives the
+    # local SUBMITTING phase so the panel reacts INSTANTLY; mirrors the operators' re-entry guard.
+    launch_in_progress: BoolProperty(name="Launch In Progress", default=False)
     active_job_id: StringProperty(name="Active Job Id", default="")
     active_job_script_name: StringProperty(name="Active Job Script Name", default="")
     active_job_status: StringProperty(name="Active Job Status", default="")
