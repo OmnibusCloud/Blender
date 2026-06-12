@@ -422,7 +422,9 @@ def _draw_output(layout, context, state, view) -> None:
         video = layout.box()
         video.prop(state, "video_format", text="Format")
         video.prop(state, "video_frame_rate", text="FPS")
-        video.prop(state, "video_constant_rate_factor", text="Quality (CRF)")
+        # ProRes quality is fixed by the profile — CRF does not apply there.
+        if not state.video_format.startswith("MOV_PRORES"):
+            video.prop(state, "video_constant_rate_factor", text="Quality (CRF)")
         video.label(text="Encodes after all frames return", icon="INFO")
 
 

@@ -57,6 +57,8 @@ FORMAT_WEBP = 4
 VIDEO_FORMAT_MP4_H264 = 1
 VIDEO_FORMAT_MP4_H265 = 2
 VIDEO_FORMAT_WEBM_VP9 = 3
+VIDEO_FORMAT_MOV_PRORES_422HQ = 4
+VIDEO_FORMAT_MOV_PRORES_4444 = 5
 
 # RenderColorMode / RenderFilmTransparency / RenderColorDepth — int values mirror the C# enum
 # declaration order in OutWit.Controller.Render.Model. 0 = Default (controller reproduces legacy
@@ -96,6 +98,8 @@ def _map_video_format(video_format: str) -> int:
         "MP4_H264": VIDEO_FORMAT_MP4_H264,
         "MP4_H265": VIDEO_FORMAT_MP4_H265,
         "WEBM_VP9": VIDEO_FORMAT_WEBM_VP9,
+        "MOV_PRORES_422HQ": VIDEO_FORMAT_MOV_PRORES_422HQ,
+        "MOV_PRORES_4444": VIDEO_FORMAT_MOV_PRORES_4444,
     }.get(video_format or "", VIDEO_FORMAT_MP4_H264)
 
 

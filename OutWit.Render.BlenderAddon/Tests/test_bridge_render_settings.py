@@ -237,7 +237,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
 
 class VideoFormatMappingTests(unittest.TestCase):
     def test_round_trips_all_presets(self):
-        for preset in ("MP4_H264", "MP4_H265", "WEBM_VP9"):
+        for preset in ("MP4_H264", "MP4_H265", "WEBM_VP9", "MOV_PRORES_422HQ", "MOV_PRORES_4444"):
             container, codec = _LOGIC.video_store_from_format(preset)
             self.assertEqual(_LOGIC.video_format_from_store(container, codec), preset)
 

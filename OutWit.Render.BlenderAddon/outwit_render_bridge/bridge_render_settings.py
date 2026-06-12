@@ -24,6 +24,8 @@ _VIDEO_FORMAT_TO_STORE = {
     "MP4_H264": ("MP4", "H264"),
     "MP4_H265": ("MP4", "H265"),
     "WEBM_VP9": ("WEBM", "VP9"),
+    "MOV_PRORES_422HQ": ("MOV", "PRORES422HQ"),
+    "MOV_PRORES_4444": ("MOV", "PRORES4444"),
 }
 _STORE_TO_VIDEO_FORMAT = {pair: preset for preset, pair in _VIDEO_FORMAT_TO_STORE.items()}
 _DEFAULT_VIDEO_FORMAT = "MP4_H264"
