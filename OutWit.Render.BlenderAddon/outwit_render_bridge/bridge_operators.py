@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 import bpy
+from bpy.props import StringProperty
 from bpy.types import Operator
 
 from .bridge_async import AsyncCall, JobMonitor, TERMINAL_STATUSES
@@ -823,6 +824,13 @@ _render_settings_seeded = False
 _render_settings_target_seeded = False
 _remember_push_pending = False
 _applying_settings_seed = False
+# A bucket-1 value changed in the UI → the heartbeat pump pushes it to the bridge store. This is what
+# makes preferences survive a Blender restart WITHOUT requiring a submit (live finding 2026-06-12:
+# sticky-on-submit alone read as "my settings are not saved").
+_render_settings_values_pending = False
+# Suppress change-marking while values are written PROGRAMMATICALLY (.blend-open recommendation) —
+# only user edits should persist, or opening a still scene would erase a remembered split=on.
+_suppress_settings_marking = False
 
 # Last connection-relevant state shown in the panel. The heartbeat timer changes this state off the
 # draw cycle, but Blender does not repaint the N-panel until a UI event (the "stuck on Connecting…
@@ -960,11 +968,37 @@ def _pump_session_state_sync(context) -> None:
     _session_state_synced_pid = pid
 
 
+def mark_render_settings_changed() -> None:
+    """A bucket-1 preference changed in the UI → queue a push to the bridge store (the heartbeat
+    pump performs the REST write, so prop update callbacks never block the UI on I/O). Suppressed
+    while values are being APPLIED rather than edited (seed, .blend-open recommendation)."""
+    global _render_settings_values_pending
+    if _applying_settings_seed or _suppress_settings_marking:
+        return
+    _render_settings_values_pending = True
+
+
+def flush_render_settings_on_unregister() -> None:
+    """Best-effort final push of a pending preference change on addon disable / Blender quit —
+    the heartbeat may not get another tick after the last edit."""
+    if not _render_settings_values_pending:
+        return
+
+    context = getattr(bpy, "context", None)
+    if context is None:
+        return
+
+    try:
+        _push_render_settings(context)
+    except Exception:
+        pass
+
+
 def _pump_render_settings(context) -> None:
     """Seed the UI from the bridge's persisted render preferences (once per Blender session) and
-    retry a pending master-toggle push. Quiet best-effort off the heartbeat: the bridge REST may
-    still be warming up — we simply try again next tick."""
-    global _render_settings_seeded
+    push pending changes (master toggle / bucket-1 values). Quiet best-effort off the heartbeat:
+    the bridge REST may still be warming up — we simply try again next tick."""
+    global _render_settings_seeded, _render_settings_values_pending
     state = _get_runtime_state(context)
     if not state.bridge_is_running or not state.bridge_lease_acquired:
         return
@@ -981,6 +1015,13 @@ def _pump_render_settings(context) -> None:
     if _remember_push_pending:
         try:
             _push_remember_render_settings(context)
+        except Exception:
+            pass
+
+    if _render_settings_values_pending and _remember_render_settings_enabled(context):
+        try:
+            _push_render_settings(context)
+            _render_settings_values_pending = False
         except Exception:
             pass
 
@@ -1028,34 +1069,46 @@ def _seed_remembered_target(context, client) -> None:
     if target is None:
         return
 
-    group_id, run_on_all = target
-    state.run_on_all_nodes = run_on_all
-    if group_id:
-        state.selected_client_group = group_id
+    global _applying_settings_seed
+    _applying_settings_seed = True
+    try:
+        group_id, run_on_all = target
+        state.run_on_all_nodes = run_on_all
+        if group_id:
+            state.selected_client_group = group_id
+    finally:
+        _applying_settings_seed = False
+
+
+def _push_render_settings(context) -> None:
+    """Read-modify-write the bucket-1 values currently in the UI into the bridge store."""
+    state = _get_runtime_state(context)
+    client = _get_bridge_client(context)
+    current = client.get_render_settings()
+    group_id = _get_selected_client_group_id(state)
+    groups = json.loads(state.groups_json) if state.groups_json else []
+    client.set_render_settings(compose_sticky_payload(
+        current,
+        remember=True,
+        split_frame=state.split_frame,
+        tiles_x=int(state.tiles_x),
+        tiles_y=int(state.tiles_y),
+        tile_overlap=int(state.tile_overlap_px),
+        anim_result=state.anim_result,
+        group_id=group_id,
+        group_name=group_name_for(groups, group_id),
+    ))
 
 
 def _sticky_render_settings_after_submit(context) -> None:
     """Persist the values the submit actually used (under the master toggle). Best-effort: a
     settings-persistence failure must never fail a successful launch."""
+    global _render_settings_values_pending
     try:
         if not _remember_render_settings_enabled(context):
             return
-        state = _get_runtime_state(context)
-        client = _get_bridge_client(context)
-        current = client.get_render_settings()
-        group_id = _get_selected_client_group_id(state)
-        groups = json.loads(state.groups_json) if state.groups_json else []
-        client.set_render_settings(compose_sticky_payload(
-            current,
-            remember=True,
-            split_frame=state.split_frame,
-            tiles_x=int(state.tiles_x),
-            tiles_y=int(state.tiles_y),
-            tile_overlap=int(state.tile_overlap_px),
-            anim_result=state.anim_result,
-            group_id=group_id,
-            group_name=group_name_for(groups, group_id),
-        ))
+        _push_render_settings(context)
+        _render_settings_values_pending = False
     except Exception:
         pass
 
@@ -1095,16 +1148,23 @@ def _bridge_lease_timer() -> float:
 @bpy.app.handlers.persistent
 def _on_blend_load(_unused) -> None:
     # When a .blend opens, default the render mode to the one that fits its output settings, so a still
-    # scene doesn't sit on Video (and vice versa). The user can still change it.
+    # scene doesn't sit on Video (and vice versa). The user can still change it. The axes writes here
+    # are PROGRAMMATIC — suppress preference persistence, or opening a still scene would erase a
+    # remembered split=on from the bridge store.
+    global _suppress_settings_marking
     try:
         window_manager = getattr(bpy.context, "window_manager", None)
         state = getattr(window_manager, "outwit_bridge_state", None)
         scene = getattr(bpy.context, "scene", None)
         if state is not None and scene is not None:
-            state.render_mode = recommended_render_mode(scene)
-            apply_render_mode_to_axes(state)
+            _suppress_settings_marking = True
+            try:
+                state.render_mode = recommended_render_mode(scene)
+                apply_render_mode_to_axes(state)
+            finally:
+                _suppress_settings_marking = False
     except Exception:
-        pass
+        _suppress_settings_marking = False
 
 
 def register_timers() -> None:
@@ -1249,9 +1309,15 @@ def _refresh_bridge_state(context) -> None:
     )
     # Default the target: with all-nodes permission but NO groups, "Run on all nodes" is the only valid
     # choice → pre-check it. When groups exist, leave the choice alone (the Target dropdown defaults to
-    # a group); never auto-clobber a user who has groups and deliberately picked all-nodes.
-    if state.can_run_on_all_clients and state.group_count == 0:
-        state.run_on_all_nodes = True
+    # a group); never auto-clobber a user who has groups and deliberately picked all-nodes. Programmatic
+    # write → must not queue a preference push.
+    if state.can_run_on_all_clients and state.group_count == 0 and not state.run_on_all_nodes:
+        global _suppress_settings_marking
+        _suppress_settings_marking = True
+        try:
+            state.run_on_all_nodes = True
+        finally:
+            _suppress_settings_marking = False
     if scope_options is not None:
         _seed_remembered_target(context, client)
     if state.is_signed_in and scope_error:
@@ -1853,6 +1919,36 @@ class OUTWIT_OT_bridge_load_result_image(Operator):
             return {"CANCELLED"}
 
 
+class OUTWIT_OT_bridge_switch_format_to_png(Operator):
+    bl_idname = "outwit.bridge_switch_format_to_png"
+    bl_label = "Switch to PNG"
+    bl_description = "Set the scene's output format (Output Properties > File Format) to PNG"
+
+    def execute(self, context):
+        render = getattr(context.scene, "render", None)
+        image_settings = getattr(render, "image_settings", None)
+        if image_settings is None:
+            self.report({"ERROR"}, "No render image settings are available on this scene.")
+            return {"CANCELLED"}
+
+        image_settings.file_format = "PNG"
+        self.report({"INFO"}, "Output format set to PNG.")
+        return {"FINISHED"}
+
+
+class OUTWIT_OT_bridge_copy_text(Operator):
+    bl_idname = "outwit.bridge_copy_text"
+    bl_label = "Copy"
+    bl_description = "Copy the full message to the clipboard"
+
+    text: StringProperty(default="", options={"SKIP_SAVE"})
+
+    def execute(self, context):
+        context.window_manager.clipboard = self.text or ""
+        self.report({"INFO"}, "Message copied to clipboard.")
+        return {"FINISHED"}
+
+
 CLASSES = (
     OUTWIT_OT_bridge_refresh_status,
     OUTWIT_OT_bridge_start,
@@ -1871,4 +1967,6 @@ CLASSES = (
     OUTWIT_OT_bridge_open_result,
     OUTWIT_OT_bridge_open_result_folder,
     OUTWIT_OT_bridge_load_result_image,
+    OUTWIT_OT_bridge_switch_format_to_png,
+    OUTWIT_OT_bridge_copy_text,
 )

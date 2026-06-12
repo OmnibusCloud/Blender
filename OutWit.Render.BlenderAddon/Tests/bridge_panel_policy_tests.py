@@ -30,7 +30,16 @@ def _load_bridge_panel_module():
     sys.modules["bpy.types"] = bpy_types_module
 
     branding_module = types.ModuleType(f"{PACKAGE_NAME}.branding")
+    # bridge_panel pulls note_panel_visible from bridge_launcher (lazy-first-start, 0.8.0), whose
+    # real import chain reaches bridge_models (dataclass(slots=True) → Blender's Python only). The
+    # panel policy under test does not need the launcher — stub it.
+    launcher_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_launcher")
+    launcher_module.note_panel_visible = lambda: None
+    sys.modules[f"{PACKAGE_NAME}.bridge_launcher"] = launcher_module
+
     branding_module.get_logo_icon_id = lambda _context: 0
+    branding_module.get_mark_icon_id = lambda _context: 0
+    branding_module.get_tray_icon_id = lambda _status: 0
     sys.modules[f"{PACKAGE_NAME}.branding"] = branding_module
 
     dependency_policy_spec = importlib.util.spec_from_file_location(
@@ -130,13 +139,6 @@ class BridgePanelPolicyTests(unittest.TestCase):
 
         self.assertIn("Current v1 policy blocks scenes with unresolved external dependencies", result)
         self.assertIn("Scene uses external image asset 'Texture'", result)
-
-    def test_can_start_render_returns_false_for_dependency_policy_block(self) -> None:
-        state = _create_state()
-
-        result = bridge_panel._can_start_render(state)
-
-        self.assertFalse(result)
 
     def test_primary_finding_uses_cache_specific_policy_message_for_external_cache_warning(self) -> None:
         state = _create_state()
@@ -244,43 +246,6 @@ class BridgePanelPolicyTests(unittest.TestCase):
 
         self.assertIn("unsupported or non-portable simulation/cache state", result)
         self.assertIn("Cloth simulation 'Pillow'", result)
-
-    def test_can_start_render_returns_false_for_simulation_cache_policy_block(self) -> None:
-        state = _create_state()
-        state.validate_warning_summary = ""
-        state.validate_issue_summary = "Particle simulation 'Emitter' is not yet portable to remote rendering in the current v1 flow."
-        state.preflight_status = "Completed"
-        state.preflight_can_render_all = True
-        state.preflight_still_ready = True
-
-        result = bridge_panel._can_start_render(state)
-
-        self.assertFalse(result)
-
-    def test_supported_image_sequence_attachment_path_stays_ready_in_compact_policy_flow(self) -> None:
-        state = _create_state()
-        state.validate_warning_summary = ""
-        state.validate_message = "Blend validated successfully."
-        state.validate_is_valid = True
-        state.dependency_plan_total_count = 2
-        state.dependency_plan_count_summary = "Image sequences × 2"
-        state.dependency_plan_packed_count = 0
-        state.dependency_plan_packed_summary = ""
-        state.dependency_plan_attachment_count = 2
-        state.dependency_plan_attachment_summary = "Image sequences × 2"
-        state.preflight_status = "Completed"
-        state.preflight_can_render_all = True
-        state.preflight_still_ready = True
-        state.preflight_message = "Still render ready."
-
-        policy = bridge_panel._selected_mode_policy(state)
-        can_start = bridge_panel._can_start_render(state)
-        block_message = bridge_panel._dependency_plan_block_message(state)
-
-        self.assertEqual("Ready", policy)
-        self.assertTrue(can_start)
-        self.assertEqual("", block_message)
-
 
 if __name__ == "__main__":
     unittest.main()

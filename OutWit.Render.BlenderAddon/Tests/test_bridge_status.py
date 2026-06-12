@@ -339,5 +339,62 @@ class TargetResolutionTests(unittest.TestCase):
         self.assertEqual(label, "Studio GPUs")
 
 
+class SwitchFormatBlockerTests(unittest.TestCase):
+
+    def setUp(self):
+        global _DEP_BLOCK, _SIM_BLOCK
+        _DEP_BLOCK = ""
+        _SIM_BLOCK = ""
+
+    def test_unsupported_format_blocks_with_png_fix(self):
+        view = status.compute_status(make_scene(file_format="TIFF"), make_state())
+        self.assertEqual(view.phase, status.Phase.BLOCKED)
+        self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT)
+        self.assertTrue(view.blocker.has_fix, "the format blocker must carry a one-click fix")
+        self.assertEqual(view.blocker.fix_operator, "outwit.bridge_switch_format_to_png")
+
+    def test_supported_format_does_not_block(self):
+        view = status.compute_status(make_scene(file_format="PNG"), make_state())
+        self.assertEqual(view.phase, status.Phase.READY)
+
+
+class ConnectionIconKeyTests(unittest.TestCase):
+
+    def test_broken_link_is_issue(self):
+        self.assertEqual(status.connection_icon_key(status.Phase.BRIDGE_MISSING), status.CONNECTION_ICON_ISSUE)
+        self.assertEqual(status.connection_icon_key(status.Phase.CLOUD_UNREACHABLE), status.CONNECTION_ICON_ISSUE)
+
+    def test_not_connected_yet_is_offline(self):
+        self.assertEqual(status.connection_icon_key(status.Phase.DISCONNECTED), status.CONNECTION_ICON_OFFLINE)
+        self.assertEqual(status.connection_icon_key(status.Phase.CONNECTING), status.CONNECTION_ICON_OFFLINE)
+        self.assertEqual(status.connection_icon_key(status.Phase.SIGNED_OUT), status.CONNECTION_ICON_OFFLINE)
+
+    def test_signed_in_phases_are_online_even_when_blocked(self):
+        # A scene/policy blocker does not demote the connection badge — the link itself is fine.
+        for phase in (status.Phase.READY, status.Phase.BLOCKED, status.Phase.RUNNING, status.Phase.FAILED):
+            self.assertEqual(status.connection_icon_key(phase), status.CONNECTION_ICON_ONLINE)
+
+
+class WrapMessageTests(unittest.TestCase):
+
+    def test_empty_text_yields_no_lines(self):
+        self.assertEqual(status.wrap_message("", 40), [])
+        self.assertEqual(status.wrap_message("   ", 40), [])
+
+    def test_short_text_is_one_line(self):
+        self.assertEqual(status.wrap_message("All good", 40), ["All good"])
+
+    def test_long_text_wraps_to_multiple_full_lines(self):
+        text = "Output format 'TIFF' is not supported — the farm renders PNG, EXR, or JPEG."
+        lines = status.wrap_message(text, 30)
+        self.assertGreater(len(lines), 1)
+        self.assertEqual(" ".join(lines), text)
+        self.assertTrue(all(len(line) <= 30 for line in lines))
+
+    def test_multiline_server_error_is_normalized(self):
+        lines = status.wrap_message("first line\n  second\tline", 100)
+        self.assertEqual(lines, ["first line second line"])
+
+
 if __name__ == "__main__":
     unittest.main()

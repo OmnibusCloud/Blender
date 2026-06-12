@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import textwrap
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -62,6 +63,32 @@ TERMINAL_JOB_PHASES = frozenset({Phase.COMPLETED, Phase.FAILED, Phase.CANCELLED}
 CONNECTION_PHASES = frozenset(
     {Phase.DISCONNECTED, Phase.CONNECTING, Phase.BRIDGE_MISSING, Phase.CLOUD_UNREACHABLE, Phase.SIGNED_OUT}
 )
+
+# Tray-style connection badge keys (mirror the desktop client's tray icon states).
+CONNECTION_ICON_ONLINE = "online"
+CONNECTION_ICON_OFFLINE = "offline"
+CONNECTION_ICON_ISSUE = "issue"
+
+
+def connection_icon_key(phase: Phase) -> str:
+    """The identity-row connection badge: 'issue' = the link itself is broken (bridge missing /
+    cloud unreachable); 'offline' = not connected or not signed in yet; 'online' = an authenticated
+    session exists. Scene/policy blockers do NOT demote the badge — the connection is fine."""
+    if phase in (Phase.BRIDGE_MISSING, Phase.CLOUD_UNREACHABLE):
+        return CONNECTION_ICON_ISSUE
+    if phase in (Phase.DISCONNECTED, Phase.CONNECTING, Phase.SIGNED_OUT):
+        return CONNECTION_ICON_OFFLINE
+    return CONNECTION_ICON_ONLINE
+
+
+def wrap_message(text: str, max_chars: int) -> list[str]:
+    """Splits a long status/blocker/error message into label-sized lines. Blender labels do not
+    wrap — a long message used to be silently truncated to the panel width (unreadable and
+    uncopyable). Whitespace is normalized so multi-line server errors flow as one paragraph."""
+    clean = " ".join((text or "").split())
+    if not clean:
+        return []
+    return textwrap.wrap(clean, width=max(16, int(max_chars)))
 
 
 # endregion
@@ -431,8 +458,9 @@ def _primary_blocker(scene, state) -> Blocker | None:
             and image_format and image_format not in SUPPORTED_IMAGE_FORMATS:
         return Blocker(
             BlockerKind.SWITCH_FORMAT,
-            f"Output format '{image_format}' is not supported — use PNG, EXR, or JPEG "
-            "(set it in Output Properties > File Format).",
+            f"Output format '{image_format}' is not supported — the farm renders PNG, EXR, or JPEG.",
+            "Switch to PNG",
+            "outwit.bridge_switch_format_to_png",
         )
 
     simulation = _simulation_cache_block(state)

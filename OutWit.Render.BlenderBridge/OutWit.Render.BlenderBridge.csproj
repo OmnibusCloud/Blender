@@ -6,6 +6,11 @@
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- The OmnibusCloud tray mark, so the bridge is recognizable in Task Manager / Explorer.
+         The default 1.0.0 is overridden by CI (-p:Version from the addon tag) so the bridge
+         reports the addon release it shipped with. -->
+    <ApplicationIcon>app-icon.ico</ApplicationIcon>
+    <Version Condition="'$(Version)' == ''">1.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

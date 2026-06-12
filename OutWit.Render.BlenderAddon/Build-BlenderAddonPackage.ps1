@@ -99,7 +99,10 @@ function Publish-Bridge([string]$outputPath)
         $bridgeProject,
         '-c', 'Release',
         '-r', $RuntimeIdentifier,
-        '-o', $outputPath
+        '-o', $outputPath,
+        # Stamp the bridge with the addon version (bl_info/manifest, validated equal above) so
+        # GetBridgeStatusAsync reports the release it shipped with instead of a static 1.0.0.
+        "/p:Version=$version"
     )
 
     if ($DeploymentMode -eq 'SelfContained')

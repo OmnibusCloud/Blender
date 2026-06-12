@@ -16,7 +16,7 @@ import os
 import bpy
 from bpy.types import Panel
 
-from .branding import get_logo_icon_id
+from .branding import get_logo_icon_id, get_mark_icon_id, get_tray_icon_id
 from .bridge_dependency_policy import (
     get_dependency_portability_blocking_issue,
     get_simulation_cache_blocking_issue,
@@ -31,11 +31,13 @@ from .bridge_status import (
     Phase,
     authorized_group_count,
     compute_status,
+    connection_icon_key,
     first_non_empty,
     first_summary_item,
     merge_unique_summaries,
     target_label,
     target_option_count,
+    wrap_message,
 )
 
 
@@ -251,22 +253,65 @@ def _dependency_plan_block_message(state) -> str:
 # region Main-flow draw (single source: compute_status)
 
 
-def _draw_status(layout, view) -> None:
+def _addon_version_text() -> str:
+    """The installed addon version from bl_info (package __init__), e.g. '0.10.0'."""
+    try:
+        import sys
+
+        info = getattr(sys.modules.get(__package__), "bl_info", None)
+        version = info.get("version") if info else None
+        return ".".join(str(part) for part in version) if version else ""
+    except Exception:
+        return ""
+
+
+def _wrap_width_chars(context) -> int:
+    """Estimate how many characters fit one panel line (labels never wrap on their own)."""
+    region = getattr(context, "region", None)
+    width_px = getattr(region, "width", 0) or 300
+    try:
+        ui_scale = float(context.preferences.system.ui_scale) or 1.0
+    except Exception:
+        ui_scale = 1.0
+    return max(16, int(width_px / (7.5 * ui_scale)))
+
+
+def _draw_message(layout, context, text, icon="NONE", alert=False, copyable=False) -> None:
+    """A long status/blocker/error message, wrapped over multiple label rows so it is readable in
+    full (a single label silently truncates to the panel width), with an optional copy-to-clipboard
+    button for error texts worth pasting into a report."""
+    lines = wrap_message(text, _wrap_width_chars(context))
+    if not lines:
+        return
+
+    column = layout.column(align=True)
+    column.alert = alert
+    for index, line in enumerate(lines):
+        column.label(text=line, icon=icon if index == 0 else "NONE")
+
+    if copyable:
+        copy_row = layout.row()
+        copy_row.alignment = "RIGHT"
+        props = copy_row.operator("outwit.bridge_copy_text", text="Copy", icon="COPYDOWN")
+        props.text = text
+
+
+def _draw_status(layout, context, view) -> None:
     """One status line + (at most) one actionable blocker. Reads the StatusView, so the panel and the
     operators always agree on status/blocker/readiness."""
-    row = layout.row()
-    row.alert = view.phase == Phase.BLOCKED
-    row.label(text=view.status_line, icon=view.status_icon)
+    is_blocked = view.phase == Phase.BLOCKED
+    _draw_message(layout, context, view.status_line, icon=view.status_icon, alert=is_blocked,
+                  copyable=is_blocked)
 
     blocker = view.blocker
     if blocker is not None and blocker.has_fix:
         layout.row().operator(blocker.fix_operator, text=blocker.fix_label, icon="ERROR")
 
 
-def _draw_identity(layout, context, state) -> None:
-    # Compact brand lockup: mark + wordmark on the left, account + icon-only Logout right-aligned on the
-    # same line (matches the design's one-line identity row).
-    icon_id = get_logo_icon_id(context)
+def _draw_identity(layout, context, state, view) -> None:
+    # Compact brand lockup: connection badge (the desktop client's tray states) + wordmark on the
+    # left, account + icon-only Logout right-aligned on the same line.
+    icon_id = get_tray_icon_id(connection_icon_key(view.phase)) or get_logo_icon_id(context)
     header = layout.row(align=True)
     if icon_id:
         header.template_icon(icon_value=icon_id, scale=1)
@@ -280,13 +325,24 @@ def _draw_identity(layout, context, state) -> None:
         account.operator("outwit.bridge_sign_out", text="", icon="UNLOCKED")
 
 
-def _draw_connection_gate(layout, state, view) -> None:
+def _draw_connection_gate(layout, context, state, view) -> None:
     """The pre-Ready gate (shown in the root panel): connecting / bridge-missing / cloud-unreachable /
     signed-out. Login is the brand CTA when signed out; otherwise a status line + a contextual retry.
     Phase 3 replaces the manual buttons with the heartbeat-driven auto-reconnect / Locate / Install."""
     phase = view.phase
 
     if phase == Phase.SIGNED_OUT:
+        # Brand lockup (design §07 "связь и вход"): the detailed mark + wordmark over the Login CTA.
+        mark = get_mark_icon_id(context)
+        if mark:
+            lockup = layout.column(align=True)
+            mark_row = lockup.row()
+            mark_row.alignment = "CENTER"
+            mark_row.template_icon(icon_value=mark, scale=4.0)
+            word_row = lockup.row()
+            word_row.alignment = "CENTER"
+            word_row.label(text="OmnibusCloud")
+
         box = layout.column(align=True)
         box.label(text="Not signed in")
         login = box.row()
@@ -386,9 +442,15 @@ def _draw_render_setup(layout, context, state, view) -> None:
     _draw_output(layout, context, state, view)
 
     # One status line + one actionable blocker, from compute_status (replaces the Engine/Scene/Mode matrix).
-    _draw_status(layout, view)
+    _draw_status(layout, context, view)
+
+    # Settings changes routinely dirty the scene (format/range live in the .blend) and a dirty scene
+    # blocks Render — give the save right here, above the button (design: Save scene over Render).
     if state.current_blend_is_dirty:
-        layout.label(text="Unsaved changes — save before rendering.", icon="ERROR")
+        layout.label(text="Unsaved changes", icon="ERROR")
+        save_row = layout.row()
+        save_row.scale_y = 1.2
+        save_row.operator("wm.save_mainfile", text="Save scene", icon="FILE_TICK")
 
     render_row = layout.row()
     render_row.enabled = view.is_ready and not state.current_blend_is_dirty
@@ -432,12 +494,12 @@ def _draw_job_lifecycle(layout, state, view) -> None:
     cancel.operator("outwit.bridge_cancel_job", text="Cancel", icon="CANCEL")
 
 
-def _draw_job_results(layout, state, view) -> None:
+def _draw_job_results(layout, context, state, view) -> None:
     """Inline result + download/open after a terminal job, with one click back to a fresh render."""
     layout.label(text=view.status_line, icon=view.status_icon)
 
     if view.phase == Phase.FAILED and state.active_job_error:
-        layout.label(text=first_summary_item(state.active_job_error) or state.active_job_error, icon="ERROR")
+        _draw_message(layout, context, state.active_job_error, icon="ERROR", alert=True, copyable=True)
 
     if view.phase == Phase.COMPLETED:
         if state.download_primary_file_name:
@@ -486,9 +548,9 @@ class OUTWIT_PT_bridge_panel(Panel):
         state = _get_runtime_state(context)
         view = compute_status(context.scene, state)
 
-        _draw_identity(layout, context, state)
+        _draw_identity(layout, context, state, view)
         if view.is_connection_issue:
-            _draw_connection_gate(layout, state, view)
+            _draw_connection_gate(layout, context, state, view)
 
 
 class OUTWIT_PT_bridge_launch_panel(Panel):
@@ -514,7 +576,7 @@ class OUTWIT_PT_bridge_launch_panel(Panel):
         if view.is_active_job:
             _draw_job_lifecycle(layout, state, view)
         elif view.is_terminal_job:
-            _draw_job_results(layout, state, view)
+            _draw_job_results(layout, context, state, view)
         else:
             _draw_render_setup(layout, context, state, view)
 
@@ -555,8 +617,14 @@ class OUTWIT_PT_bridge_connection_panel(Panel):
             text=f"Cloud: {'Connected' if state.is_connected_to_cloud else 'Offline'}",
             icon="CHECKMARK" if state.is_connected_to_cloud else "RADIOBUT_OFF",
         )
+        # Two different versions: the ADDON (bl_info, what the user installed) and the BRIDGE process
+        # it spawned. The old single "Version:" line showed the bridge's and read as a wrong addon
+        # version.
+        addon_version = _addon_version_text()
+        if addon_version:
+            layout.label(text=f"Add-on: {addon_version}")
         if state.bridge_version:
-            layout.label(text=f"Version: {state.bridge_version}")
+            layout.label(text=f"Bridge: {state.bridge_version}")
 
         actions = layout.row(align=True)
         actions.operator("outwit.bridge_refresh_status", text="Refresh")
@@ -675,8 +743,8 @@ class OUTWIT_PT_bridge_error_panel(Panel):
         return bool(_get_runtime_state(context).last_error)
 
     def draw(self, context):
-        layout = self.layout
-        layout.label(text=_get_runtime_state(context).last_error)
+        _draw_message(self.layout, context, _get_runtime_state(context).last_error,
+                      icon="ERROR", copyable=True)
 
 
 # endregion

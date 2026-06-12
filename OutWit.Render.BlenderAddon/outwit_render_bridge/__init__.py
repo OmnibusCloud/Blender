@@ -1,7 +1,7 @@
 bl_info = {
     "name": "OmnibusCloud Render Bridge",
     "author": "OutWit",
-    "version": (0, 9, 2),
+    "version": (0, 10, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > OmnibusCloud",
     "description": "Thin Blender addon for the local OmnibusCloud render bridge",
@@ -12,7 +12,12 @@ import bpy
 
 from .branding import register_branding, unregister_branding
 from .bridge_launcher import cleanup_bridge_on_unregister
-from .bridge_operators import CLASSES as OPERATOR_CLASSES, register_timers, unregister_timers
+from .bridge_operators import (
+    CLASSES as OPERATOR_CLASSES,
+    flush_render_settings_on_unregister,
+    register_timers,
+    unregister_timers,
+)
 from .bridge_panel import CLASSES as PANEL_CLASSES
 from .bridge_preferences import CLASSES as PREFERENCE_CLASSES
 from .bridge_state import CLASSES as STATE_CLASSES, register_state, unregister_state
@@ -54,6 +59,9 @@ def unregister():
     # cleanup to find the lease + process). The .NET watchdog is the backstop for the crash path
     # where unregister never runs; this is the clean path for addon-disable / Blender-quit.
     unregister_timers()
+    # Push a pending render-preference change while the bridge is still up (the heartbeat that
+    # would normally deliver it is gone now).
+    flush_render_settings_on_unregister()
     cleanup_bridge_on_unregister()
     unregister_branding()
     unregister_state()

@@ -28,7 +28,17 @@ def _load_bridge_operators_module():
             self.report_calls.append((set(levels), message))
 
     bpy_types_module.Operator = Operator
+    bpy_types_module.PropertyGroup = type("PropertyGroup", (), {})
+    bpy_types_module.WindowManager = type("WindowManager", (), {})
     bpy_module.types = bpy_types_module
+    # bridge_operators does `from bpy.props import StringProperty` — the from-import resolves the
+    # submodule via sys.modules, so a stub entry is enough (bpy itself is not a package here).
+    bpy_props_module = types.ModuleType("bpy.props")
+    for _prop in ("StringProperty", "BoolProperty", "IntProperty", "FloatProperty",
+                  "EnumProperty", "PointerProperty"):
+        setattr(bpy_props_module, _prop, lambda **kwargs: None)
+    bpy_module.props = bpy_props_module
+    sys.modules["bpy.props"] = bpy_props_module
     bpy_module.data = SimpleNamespace(
         filepath="C:/Workspace/test.blend",
         is_dirty=False,
@@ -40,7 +50,9 @@ def _load_bridge_operators_module():
             is_registered=lambda _: False,
             register=lambda *args, **kwargs: None,
             unregister=lambda *args, **kwargs: None,
-        )
+        ),
+        # @bpy.app.handlers.persistent decorator + load_post list (addon 0.4.0 recommended-mode hook).
+        handlers=SimpleNamespace(persistent=lambda func: func, load_post=[]),
     )
     bpy_module.context = SimpleNamespace(window_manager=None)
 
@@ -66,6 +78,17 @@ def _load_bridge_operators_module():
     bridge_client_module.BridgeClientError = BridgeClientError
     sys.modules[f"{PACKAGE_NAME}.bridge_client"] = bridge_client_module
 
+    # bridge_render_settings (Phase 5 seed/sticky logic) is covered by its own headless suite;
+    # here it is stubbed like bridge_client (its bridge_models import uses dataclass(slots=True),
+    # which needs the Blender-bundled Python, not necessarily the test interpreter).
+    render_settings_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_render_settings")
+    render_settings_module.compose_remember_payload = lambda current, remember: {}
+    render_settings_module.compose_sticky_payload = lambda current, **kwargs: {}
+    render_settings_module.group_name_for = lambda groups, group_id: ""
+    render_settings_module.resolve_target_seed = lambda settings, groups, can_all: None
+    render_settings_module.seed_prop_values = lambda settings: {}
+    sys.modules[f"{PACKAGE_NAME}.bridge_render_settings"] = render_settings_module
+
     bridge_context_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_context")
     bridge_context_module.load_latest_context = lambda *_args, **_kwargs: (None, "")
     sys.modules[f"{PACKAGE_NAME}.bridge_context"] = bridge_context_module
@@ -77,6 +100,9 @@ def _load_bridge_operators_module():
 
     bridge_engine_module.detect_scene_engine_family = lambda _scene: ("Cycles", 0)
     bridge_engine_module.get_scene_engine_token = lambda _scene: "CYCLES"
+    bridge_engine_module.recommended_render_mode = lambda _scene: "Still"
+    bridge_engine_module.render_mode_matches_recommendation = lambda current, recommended: current == recommended
+    bridge_engine_module.scene_frame_count = lambda _scene: 1
     bridge_engine_module.SceneEngineRoutingError = SceneEngineRoutingError
     sys.modules[f"{PACKAGE_NAME}.bridge_engine_routing"] = bridge_engine_module
 
@@ -90,6 +116,11 @@ def _load_bridge_operators_module():
     bridge_launcher_module.refresh_bridge_process_state = lambda *_args, **_kwargs: None
     bridge_launcher_module.release_bridge_lease = lambda *_args, **_kwargs: None
     bridge_launcher_module.stop_bridge = lambda *_args, **_kwargs: None
+    # Lazy-first-start surface (addon 0.8.0).
+    bridge_launcher_module.apply_launched_state = lambda *_args, **_kwargs: None
+    bridge_launcher_module.panel_was_seen = lambda: False
+    bridge_launcher_module.resolve_launch_target = lambda *_args, **_kwargs: ("bridge.exe", "session")
+    bridge_launcher_module.spawn_bridge_process = lambda *_args, **_kwargs: 0
     sys.modules[f"{PACKAGE_NAME}.bridge_launcher"] = bridge_launcher_module
 
     dependency_policy_spec = importlib.util.spec_from_file_location(
@@ -121,6 +152,7 @@ def _load_bridge_operators_module():
 
     bridge_scene_packaging_module.ScenePackagingError = ScenePackagingError
     bridge_scene_packaging_module.create_packed_upload_copy = lambda path: _PackedCopyContext(path, "Packed upload copy created.")
+    bridge_scene_packaging_module.scene_output_signature = lambda _scene: "PNG|RGBA|8|O||"
     sys.modules[f"{PACKAGE_NAME}.bridge_scene_packaging"] = bridge_scene_packaging_module
 
     bridge_scene_attachments_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_scene_attachments")
@@ -680,7 +712,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -695,7 +731,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_cache_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -710,7 +750,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -725,7 +769,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_baked_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -740,7 +788,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_baked_mesh_cache_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -755,7 +807,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_cloth_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -770,7 +826,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_particle_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -785,7 +845,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_geometry_cache_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
         operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
@@ -801,7 +865,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         response = _create_validate_response()
 
         bridge_operators._get_bridge_client = lambda _context: object()
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -823,7 +891,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         response = _create_cache_validate_response()
 
         bridge_operators._get_bridge_client = lambda _context: object()
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -879,7 +951,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         response = _create_simulation_issue_validate_response()
 
         bridge_operators._get_bridge_client = lambda _context: object()
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -901,7 +977,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         response = _create_baked_mesh_cache_issue_validate_response()
 
         bridge_operators._get_bridge_client = lambda _context: object()
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -923,7 +1003,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         response = _create_particle_simulation_issue_validate_response()
 
         bridge_operators._get_bridge_client = lambda _context: object()
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -945,7 +1029,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         response = _create_cloth_simulation_issue_validate_response()
 
         bridge_operators._get_bridge_client = lambda _context: object()
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -967,7 +1055,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         response = _create_geometry_cache_issue_validate_response()
 
         bridge_operators._get_bridge_client = lambda _context: object()
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -988,7 +1080,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -1008,7 +1104,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_cache_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -1030,7 +1130,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         preflight_response = _create_ready_preflight_response()
         launch_response = SimpleNamespace(job_id="job-2", status="Completed", message="RenderStill launched successfully.")
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, validate_response)
@@ -1056,7 +1160,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -1076,7 +1184,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_baked_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -1096,7 +1208,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_baked_mesh_cache_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -1116,7 +1232,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_particle_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -1136,7 +1256,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_cloth_simulation_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)
@@ -1156,7 +1280,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         context = _create_context(state)
         response = _create_geometry_cache_issue_validate_response()
 
+        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
+        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
 
         def run_validate_blend(_context):
             bridge_operators._apply_validate_response(state, response)

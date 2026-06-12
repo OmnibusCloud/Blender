@@ -63,6 +63,24 @@ def _sync_render_mode(self, context) -> None:
     self.render_mode = render_mode_for_axes(self.output_axis, self.split_frame, self.anim_result)
 
 
+def _mark_render_settings_changed(self, context) -> None:
+    """A bucket-1 preference changed in the UI → queue a persist to the bridge store. Late import
+    (the pending flag and the push live in bridge_operators; importing it at module top would be a
+    cycle). The heartbeat pump performs the actual REST write off the next tick, so a prop update
+    callback never blocks the UI on I/O."""
+    try:
+        from . import bridge_operators
+
+        bridge_operators.mark_render_settings_changed()
+    except Exception:
+        pass
+
+
+def _sync_render_mode_and_persist(self, context) -> None:
+    _sync_render_mode(self, context)
+    _mark_render_settings_changed(self, context)
+
+
 def apply_render_mode_to_axes(state) -> None:
     """Reverse sync: reflect a render_mode set elsewhere (recommended-mode operator, .blend load) back
     into the Output axes so the segmented controls match. Setting the axes re-derives the same
@@ -89,6 +107,13 @@ _OUTPUT_FORMAT_ITEMS = [
 # Map a scene file_format string to the curated control's index (EXR multilayer collapses to EXR).
 _OUTPUT_FORMAT_TO_INDEX = {"PNG": 0, "OPEN_EXR": 1, "OPEN_EXR_MULTILAYER": 1, "JPEG": 2}
 
+# Index of the transient "unsupported" display entry (see _output_format_items).
+_OUTPUT_FORMAT_UNSUPPORTED_INDEX = len(_OUTPUT_FORMAT_ITEMS)
+
+# Dynamic-enum GC guard: Blender keeps weak references to item strings (same issue as the group
+# dropdown) — hold the last built list at module level.
+_OUTPUT_FORMAT_ITEMS_CACHE: list[tuple] = []
+
 
 def _scene_image_settings():
     scene = getattr(bpy.context, "scene", None)
@@ -96,12 +121,36 @@ def _scene_image_settings():
     return getattr(render, "image_settings", None)
 
 
-def _output_format_get(self) -> int:
+def _scene_file_format() -> str:
     image_settings = _scene_image_settings()
-    fmt = getattr(image_settings, "file_format", "") if image_settings is not None else ""
-    # An out-of-band unsupported format (set in Blender's own Output panel) displays as PNG here; the
-    # compute_status SWITCH_FORMAT blocker still catches it, and picking any item writes a supported one.
-    return _OUTPUT_FORMAT_TO_INDEX.get(fmt, 0)
+    return (getattr(image_settings, "file_format", "") or "") if image_settings is not None else ""
+
+
+def _output_format_items(self, context):
+    """The curated list, PLUS a transient read-only entry showing the scene's REAL format when it is
+    unsupported. Displaying 'PNG' for a TIFF scene (the old index-0 fallback) made the SWITCH_FORMAT
+    blocker look like a false alarm — and clicking 'PNG' was a no-op because the displayed value
+    didn't change, so the setter never fired. Now the control tells the truth and any pick works."""
+    items = [(identifier, label, description, "", index)
+             for index, (identifier, label, description) in enumerate(_OUTPUT_FORMAT_ITEMS)]
+
+    fmt = _scene_file_format()
+    if fmt and fmt not in _OUTPUT_FORMAT_TO_INDEX:
+        items.append(("UNSUPPORTED", f"{fmt} (not supported)",
+                      "The scene's current output format — the farm cannot render it; pick one of the "
+                      "supported formats", "ERROR", _OUTPUT_FORMAT_UNSUPPORTED_INDEX))
+
+    _OUTPUT_FORMAT_ITEMS_CACHE.clear()
+    _OUTPUT_FORMAT_ITEMS_CACHE.extend(items)
+    return _OUTPUT_FORMAT_ITEMS_CACHE
+
+
+def _output_format_get(self) -> int:
+    fmt = _scene_file_format()
+    if not fmt:
+        # No scene/render context (headless, early draw) — the transient entry is absent then.
+        return 0
+    return _OUTPUT_FORMAT_TO_INDEX.get(fmt, _OUTPUT_FORMAT_UNSUPPORTED_INDEX)
 
 
 def _output_format_set(self, value: int) -> None:
@@ -136,18 +185,20 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         name="Target",
         description="Which group of nodes to render on",
         items=selected_group_items,
+        update=_mark_render_settings_changed,
     )
     run_on_all_nodes: BoolProperty(
         name="Run on all nodes",
         description="Render on any available node instead of a specific group "
                     "(only offered when your account is allowed to)",
         default=False,
+        update=_mark_render_settings_changed,
     )
     output_format: EnumProperty(
         name="Format",
         description="Output image format — only the formats the render farm supports. Writes to the "
                     "scene's Output Properties (File Format)",
-        items=_OUTPUT_FORMAT_ITEMS,
+        items=_output_format_items,
         get=_output_format_get,
         set=_output_format_set,
     )
@@ -206,9 +257,9 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     preflight_issue_summary: StringProperty(name="Preflight Issue Summary", default="")
     preflight_warning_summary: StringProperty(name="Preflight Warning Summary", default="")
     still_frame: IntProperty(name="Still Frame", default=1, min=1)
-    tiles_x: IntProperty(name="Tiles X", default=2, min=1)
-    tiles_y: IntProperty(name="Tiles Y", default=2, min=1)
-    tile_overlap_px: IntProperty(name="Tile Overlap Px", default=8, min=0)
+    tiles_x: IntProperty(name="Tiles X", default=2, min=1, update=_mark_render_settings_changed)
+    tiles_y: IntProperty(name="Tiles Y", default=2, min=1, update=_mark_render_settings_changed)
+    tile_overlap_px: IntProperty(name="Tile Overlap Px", default=8, min=0, update=_mark_render_settings_changed)
     video_frame_rate: IntProperty(name="Video Frame Rate", default=24, min=1)
     video_constant_rate_factor: IntProperty(name="Video Constant Rate Factor", default=23, min=0)
     render_mode: EnumProperty(
@@ -236,7 +287,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         name="Split frame across machines",
         description="Tile the frame and render the tiles across multiple machines (heavy single frames)",
         default=False,
-        update=_sync_render_mode,
+        update=_sync_render_mode_and_persist,
     )
     anim_result: EnumProperty(
         name="Result",
@@ -246,7 +297,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
             ("Video", "Video", "Encode a single video after all frames return"),
         ],
         default="Sequence",
-        update=_sync_render_mode,
+        update=_sync_render_mode_and_persist,
     )
     active_job_id: StringProperty(name="Active Job Id", default="")
     active_job_script_name: StringProperty(name="Active Job Script Name", default="")
