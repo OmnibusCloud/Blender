@@ -145,6 +145,20 @@ def _output_format_items(self, context):
     return _OUTPUT_FORMAT_ITEMS_CACHE
 
 
+def _mark_scene_modified(self, context) -> None:
+    """Our Format/Frame controls are TRANSIT props on the WindowManager whose set-callbacks write
+    into the scene FROM PYTHON — and Python writes do not push an undo step, so Blender never
+    flags the file as modified (`bpy.data.is_dirty` stays False) and the Save-scene button never
+    appeared. Push one undo step to raise the flag; skip when already dirty so dragging a slider
+    does not spam the undo stack."""
+    if bool(getattr(bpy.data, "is_dirty", False)):
+        return
+    try:
+        bpy.ops.ed.undo_push(message="OmnibusCloud render setting")
+    except Exception:
+        pass
+
+
 # The still Frame is bucket 2 ("derive from the scene, don't store"): it binds to the scene's
 # current frame, so it persists in the .blend and survives restarts with the file — an unbound
 # IntProperty reset to 1 every session and read as "my Frame is not saved".
@@ -217,6 +231,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         items=_output_format_items,
         get=_output_format_get,
         set=_output_format_set,
+        update=_mark_scene_modified,
     )
     current_user_display_name: StringProperty(name="Display Name", default="")
     current_user_id: StringProperty(name="User Id", default="")
@@ -279,6 +294,7 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         min=1,
         get=_still_frame_get,
         set=_still_frame_set,
+        update=_mark_scene_modified,
     )
     tiles_x: IntProperty(name="Tiles X", default=2, min=1, update=_mark_render_settings_changed)
     tiles_y: IntProperty(name="Tiles Y", default=2, min=1, update=_mark_render_settings_changed)

@@ -1926,6 +1926,9 @@ class OUTWIT_OT_bridge_switch_format_to_png(Operator):
     bl_idname = "outwit.bridge_switch_format_to_png"
     bl_label = "Switch to PNG"
     bl_description = "Set the scene's output format (Output Properties > File Format) to PNG"
+    # UNDO pushes an undo step on success — that is also what flags the file as modified, so the
+    # Save-scene button appears after the fix is applied.
+    bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         render = getattr(context.scene, "render", None)
