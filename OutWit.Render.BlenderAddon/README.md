@@ -1,179 +1,78 @@
-# OmnibusCloud Render Blender Addon
+# OutWit.Render.BlenderAddon
 
-This folder contains the first Python Blender addon skeleton for the local OmnibusCloud render bridge.
+The Blender extension package (`outwit_render_bridge/`) and its packaging scripts. The
+installable artifact is a per-platform zip with the .NET bridge bundled inside — see the
+[repo README](../README.md) for what the extension does and how to install a release.
 
-The installable Blender addon package currently lives in:
+## Layout
 
-- `outwit_render_bridge/`
+- `outwit_render_bridge/` — the extension sources. `__init__.py` (`bl_info`) and
+  `blender_manifest.toml` carry the version in two places; the build verifies they are
+  equal and fails otherwise.
+  - `bridge/<rid>/<mode>/` — where the build stages the bundled bridge binaries
+    (not in source control).
+- `Tests/` — headless Python tests; they run without Blender (`bpy` is stubbed).
+- `Build-BlenderAddonPackage.ps1` / `Build-BlenderAddonPackages.ps1` — packaging scripts.
 
-The outer `Tools/Render/OutWit.Render.BlenderAddon/` directory is the repo container for that package and its supporting files.
-
-The public-facing addon/client branding for the global WitCloud instance is `OmnibusCloud`.
-
-The addon package also carries local OmnibusCloud logo assets for dark and light themes.
-
-The intended release direction is six platform-specific addon packages:
-
-- `windows-x64` self-contained
-- `windows-x64` framework-dependent
-- `linux-x64` self-contained
-- `linux-x64` framework-dependent
-- `macos-arm64` self-contained
-- `macos-arm64` framework-dependent
-
-The self-contained variants are the primary user-friendly downloads. The framework-dependent variants are the smaller advanced-option downloads for users who already have a compatible `.NET` runtime installed.
-
-## Build package
-
-To build one concrete installable Blender addon zip from this repo folder, run:
+## Build a package
 
 ```powershell
-cd Tools\Render\OutWit.Render.BlenderAddon
 .\Build-BlenderAddonPackage.ps1 -RuntimeIdentifier win-x64 -DeploymentMode SelfContained
 ```
 
-Supported runtime identifiers:
+- Runtime identifiers: `win-x64`, `linux-x64`, `osx-arm64`.
+- Deployment modes: `SelfContained` (no .NET required on the user's machine — what
+  releases ship) and `FrameworkDependent` (smaller, requires a .NET 10 runtime).
+- `Build-BlenderAddonPackages.ps1` builds the full matrix in one go.
 
-- `win-x64`
-- `linux-x64`
-- `osx-arm64`
+Zips land in `dist/`, version-stamped from `bl_info`/the manifest; the same version is
+compiled into the bridge binary.
 
-Supported deployment modes:
+Linux/macOS packages must carry the executable bit on the bridge binary, which zips
+created on Windows cannot store — release packages are therefore built by CI on a Linux
+runner ([`.github/workflows/addon.yml`](../.github/workflows/addon.yml)), which also
+signs and notarizes the macOS bridge and attaches everything to the GitHub Release on an
+`addon-v*` tag. Windows-built unix zips are fine for working on the addon itself.
 
-- `SelfContained`
-- `FrameworkDependent`
+## Install from disk
 
-To build the full current six-artifact matrix, run:
+`Edit → Preferences → Add-ons → ⌄ → Install from Disk…`, pick the zip from `dist/`,
+enable **OmnibusCloud Render Bridge**. The panel appears in the 3D-viewport sidebar
+(`N` key) under the **OmnibusCloud** tab.
 
-```powershell
-cd Tools\Render\OutWit.Render.BlenderAddon
-.\Build-BlenderAddonPackages.ps1
+## Add-on preferences
+
+- **Auto-start Bridge** (default: on) — the bundled bridge launches automatically when
+  the panel is first shown and lives for the rest of the Blender session.
+- **Bridge Executable Path** — point the addon at a local bridge build
+  (e.g. `dotnet publish` output) during development.
+- **Bridge Context Directory** — explicit bridge-discovery directory (see below).
+- **Remember last render settings** (default: on) — persists panel settings (tiles,
+  video preset, target, …) per OS user, stored by the bridge.
+- **Logo Variant** — Auto / Dark / Light.
+
+## Tests
+
+Two test families, run both from this folder:
+
+```bash
+# discovered suite (test_*.py)
+python -m unittest discover -s Tests -p "test_*.py"
+
+# explicit suites (*_tests.py — not matched by the discover pattern)
+python -m unittest Tests.bridge_dependency_policy_tests Tests.bridge_operator_policy_tests Tests.bridge_panel_policy_tests Tests.bridge_scene_attachment_tests Tests.bridge_scene_packaging_tests
 ```
-
-The scripts create versioned addon packages under:
-
-- `Tools/Render/OutWit.Render.BlenderAddon/dist/`
-
-The generated zips are intended to be installed directly in Blender.
-
-The current release workflow is also configured to build and attach these Blender addon package variants to GitHub releases.
-
-Each package now carries the bridge payload inside the addon layout expected by the addon bootstrap logic:
-
-- `outwit_render_bridge/bridge/<rid>/self-contained/`
-- `outwit_render_bridge/bridge/<rid>/framework-dependent/`
-
-## Install into Blender
-
-1. Build the addon zip with `Build-BlenderAddonPackage.ps1` or `Build-BlenderAddonPackages.ps1`.
-2. Open Blender.
-3. Go to `Edit` -> `Preferences` -> `Add-ons`.
-4. Click `Install from Disk...`.
-5. Select the generated zip from `dist/`.
-6. Enable the addon `OmnibusCloud Render Bridge`.
-
-After installation the addon appears in:
-
-- `View3D` -> sidebar -> `OmnibusCloud`
-
-## Start the local bridge
-
-The preferred current flow is that the addon starts the local OmnibusCloud Blender bridge automatically.
-
-Normal startup flow:
-
-1. install and enable the addon;
-2. keep `Auto-start Bridge` enabled in addon preferences;
-3. click `Refresh`, `Sign In`, or another bridge-backed action;
-4. let the addon start the bundled bridge for the current package.
-
-Development or fallback flow:
-
-1. point `Bridge Executable Path` at a local bridge build or publish output;
-2. keep `Auto-start Bridge` enabled;
-3. let the addon start that bridge when needed.
-
-Manual fallback is still possible if required:
-
-1. start the local `.NET` Blender bridge process yourself;
-2. confirm it writes `bridge-local-connection.<pid>.json`;
-3. if the addon does not discover that file automatically, set `Bridge Context Directory`.
-
-## First-run smoke test
-
-Recommended first smoke test inside Blender:
-
-1. open the `OmnibusCloud` sidebar tab;
-2. click `Refresh`;
-3. confirm bridge status and logo render correctly;
-4. click `Sign In`;
-5. save the current `.blend` file;
-6. click `Upload Blend`;
-7. click `Validate Blend`;
-8. click `Run Preflight`;
-9. choose a render mode and click `Launch Render`;
-10. click `Refresh Job` or enable job auto-refresh;
-11. after completion, click `Download Result`;
-12. use `Open Result`, `Open Folder`, or `Load Result Image`.
-
-## Current workflow summary
-
-The current addon workflow is:
-
-1. auto-start the local bridge when possible, or discover an already running local bridge connection context;
-2. sign in through the bridge;
-3. upload the current saved `.blend` file;
-4. run validation and preflight;
-5. launch one bundled render mode;
-6. refresh or auto-refresh job state;
-7. download and open the final result.
-
-If bundled bridge bootstrap is not available yet in the current package, you can still point the addon to a bridge build explicitly through addon preferences:
-
-- `Bridge Executable Path`
-- `Auto-start Bridge`
-
-## Current scope
-
-The current slice is intentionally narrow:
-
-- standard Blender addon package registration
-- bridge connection-context discovery
-- local loopback bridge status refresh
-- browser sign-in trigger through the bridge
-- sign-out trigger through the bridge
-- execution-scope summary in a simple Blender panel
-- upload of the current saved `.blend` file through the bridge
-- `RenderValidateBlend` against the last uploaded blob
-- `RenderPreflight` using current Blender scene defaults plus simple tile/video addon settings
-- launch of `RenderStill`, `RenderStillTiled`, `RenderFrames`, and `RenderVideo` using the current Blender scene defaults plus addon settings
-- `GetJob` refresh for the current active bridge job
-- `DownloadResult` for the current active bridge job
-- optional auto-refresh of the active job summary from inside Blender
-- convenience actions to open the downloaded result or its containing folder
-- bridge auto-start preference and optional explicit bridge executable path
-- manual bridge start/stop controls and bridge process status tracking in the addon UI
-- addon-side bridge lease acquisition and heartbeat tracking for bridge lifetime management
 
 ## Bridge discovery
 
-The addon looks for `bridge-local-connection.<pid>.json` in this order:
+A running bridge advertises itself with a `bridge-local-connection.<pid>.json` file
+containing the loopback REST URL and the per-session secret. The addon searches, in
+order:
 
-1. addon preference `Bridge Context Directory`
-2. environment variable `OUTWIT_BRIDGE_SESSION_DIR`
-3. `%TEMP%/BridgeSession` (or platform equivalent temp directory)
-4. `./BridgeSession`
+1. the **Bridge Context Directory** preference;
+2. the `OUTWIT_BRIDGE_SESSION_DIR` environment variable;
+3. `<temp>/BridgeSession`;
+4. `./BridgeSession`.
 
-The bridge connection-context file is expected to contain:
-
-- `LocalRestUrl`
-- `IsSecretRequired`
-- `SessionSecret`
-- `BridgeProcessId`
-- `CreatedUtc`
-
-## Next planned work
-
-- richer progress presentation and timer behavior
-- better mode-specific UX and result presentation
-- richer Blender UX based on `Docs/RenderBlenderUxPlan.md`
+This is also how the addon adopts an already-running bridge after a `.blend` switch or a
+Blender restart instead of spawning a second one.

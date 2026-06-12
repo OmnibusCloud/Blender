@@ -14,7 +14,7 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
     /// File-backed fallback bridge session store. The persisted session holds the OIDC refresh token,
     /// so on Windows it is encrypted at rest with DPAPI (CurrentUser scope — only the same OS user can
     /// read it back). On macOS/Linux the payload is written unprotected for now (a real Keychain /
-    /// Secret Service backend is the remaining work — see docs/refresh-token-storage.md); an envelope
+    /// Secret Service backend is the remaining work); an envelope
     /// flag records which, so a DPAPI file fails closed (returns null → re-login) on any other platform
     /// rather than being mis-read.
     /// </summary>

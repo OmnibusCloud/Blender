@@ -1,7 +1,6 @@
 """Single source of truth for "what state are we in, and what should the panel show".
 
-Phase 1 of the redesign (see docs/omnibuscloud-render-bridge-implementation-plan.md): the panel and
-the operators used to each derive status/blocker text from a scatter of boolean flags, and the two
+The panel and the operators used to each derive status/blocker text from a scatter of boolean flags, and the two
 copies drifted (operator reported one thing, panel showed another). `compute_status` is the ONE pure
 function that turns the raw runtime state + scene facts into a `StatusView`: a single phase, a single
 status line, a single typed blocker (with an optional fix-action), and a collapsed diagnostics map.

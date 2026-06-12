@@ -1,5 +1,4 @@
-"""The N-panel UI. Phase 2 of the redesign (see docs/omnibuscloud-render-bridge-implementation-plan.md):
-the 12-class panel collapses into three visible surfaces — identity header, the Render work-flow, and a
+"""The N-panel UI: three visible surfaces — identity header, the Render work-flow, and a
 collapsed Advanced/Diagnostics block — so the artist sees one clean flow (90%) with diagnostics tucked
 away (10%).
 
