@@ -91,6 +91,7 @@ def _load_bridge_operators_module():
 
     bridge_context_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_context")
     bridge_context_module.load_latest_context = lambda *_args, **_kwargs: (None, "")
+    bridge_context_module.try_load_latest_context = lambda *_args, **_kwargs: (None, None)
     sys.modules[f"{PACKAGE_NAME}.bridge_context"] = bridge_context_module
 
     bridge_engine_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_engine_routing")
@@ -121,6 +122,7 @@ def _load_bridge_operators_module():
     bridge_launcher_module.panel_was_seen = lambda: False
     bridge_launcher_module.resolve_launch_target = lambda *_args, **_kwargs: ("bridge.exe", "session")
     bridge_launcher_module.spawn_bridge_process = lambda *_args, **_kwargs: 0
+    bridge_launcher_module.is_process_running = lambda _pid: False
     sys.modules[f"{PACKAGE_NAME}.bridge_launcher"] = bridge_launcher_module
 
     dependency_policy_spec = importlib.util.spec_from_file_location(

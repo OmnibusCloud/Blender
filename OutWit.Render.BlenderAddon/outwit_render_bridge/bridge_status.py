@@ -29,6 +29,7 @@ from .bridge_dependency_policy import (
 from .bridge_engine_routing import (
     recommended_render_mode,
     render_mode_matches_recommendation,
+    scene_frame_count,
 )
 
 
@@ -493,6 +494,18 @@ def _recommendation(scene, state) -> str:
     current = getattr(state, "render_mode", "Still")
     if render_mode_matches_recommendation(current, recommended):
         return ""
+
+    # 'Still' is the SAFETY DEFAULT on open (0.4.1 lesson: never auto-pick a 10000-frame run), not
+    # a judgement about the scene: an explicit Animation choice on a MULTI-frame image-format scene
+    # is perfectly legitimate — nagging 'Recommended: Image' against it only trains the artist to
+    # ignore the hint. Flag Animation modes only when the scene really has a single frame.
+    if recommended == "Still" and current in ("Frames", "Video"):
+        try:
+            if scene_frame_count(scene) > 1:
+                return ""
+        except Exception:
+            return ""
+
     return recommended
 
 

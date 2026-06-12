@@ -41,6 +41,7 @@ def _load_bridge_status():
 
     routing.recommended_render_mode = recommended_render_mode
     routing.render_mode_matches_recommendation = render_mode_matches_recommendation
+    routing.scene_frame_count = lambda scene: int(scene.frame_end) - int(scene.frame_start) + 1
     sys.modules[_PKG + ".bridge_engine_routing"] = routing
 
     deps = types.ModuleType(_PKG + ".bridge_dependency_policy")
@@ -181,6 +182,20 @@ class ComputeStatusTests(unittest.TestCase):
     def test_recommendation_flags_video_format_with_still_mode(self):
         view = status.compute_status(make_scene(file_format="FFMPEG"), make_state(render_mode="Still"))
         self.assertEqual(view.recommendation, "Video")
+
+    def test_no_nag_for_animation_on_multiframe_image_scene(self):
+        # 'Still' is only the safety default on open — an explicit Animation choice on a 209-frame
+        # PNG scene is legitimate and must not be nagged against (live finding 2026-06-12).
+        view = status.compute_status(
+            make_scene(file_format="PNG", frame_start=4, frame_end=212),
+            make_state(render_mode="Frames"))
+        self.assertEqual(view.recommendation, "")
+
+    def test_animation_on_single_frame_scene_recommends_still(self):
+        view = status.compute_status(
+            make_scene(file_format="PNG", frame_start=1, frame_end=1),
+            make_state(render_mode="Frames"))
+        self.assertEqual(view.recommendation, "Still")
 
     def test_no_recommendation_when_mode_matches(self):
         view = status.compute_status(make_scene(file_format="PNG"), make_state(render_mode="Still"))

@@ -11,7 +11,7 @@ from bpy.types import Operator
 
 from .bridge_async import AsyncCall, JobMonitor, TERMINAL_STATUSES
 from .bridge_client import BridgeClient, BridgeClientError
-from .bridge_context import load_latest_context
+from .bridge_context import load_latest_context, try_load_latest_context
 from .bridge_dependency_policy import get_dependency_portability_blocking_issue, get_simulation_cache_blocking_issue
 from .bridge_engine_routing import (
     detect_scene_engine_family,
@@ -26,6 +26,7 @@ from .bridge_launcher import (
     cleanup_bridge_on_unregister,
     ensure_bridge_running,
     get_effective_context_directory,
+    is_process_running,
     launch_bridge,
     panel_was_seen,
     ping_bridge_lease,
@@ -875,6 +876,38 @@ def rearm_lazy_first_start() -> None:
     _lazy_launch_failed = False
 
 
+def _try_adopt_running_bridge(context) -> bool:
+    """Re-attach to a bridge that is ALREADY running instead of spawning a second one. Opening
+    another .blend replaces the WindowManager — and with it our runtime state (bridge PID, lease
+    id) — while the bridge process is alive and holding the port: a blind spawn then crashes on
+    the busy port, latches the failure, and the orphaned bridge kills itself when its un-pinged
+    lease expires (live finding 2026-06-12). Re-discover it through the connection-context file."""
+    state = _get_runtime_state(context)
+    try:
+        executable_path, session_directory = resolve_launch_target(context)
+        bridge_context, context_path = try_load_latest_context(str(session_directory))
+    except Exception:
+        return False
+
+    if bridge_context is None or context_path is None:
+        return False
+    if not is_process_running(int(bridge_context.bridge_process_id or 0)):
+        return False
+
+    state.bridge_process_id = bridge_context.bridge_process_id
+    state.bridge_is_running = True
+    state.bridge_started_by_addon = True
+    state.bridge_executable_path = str(executable_path)
+    state.bridge_session_directory = os.path.dirname(context_path)
+    state.bridge_launch_message = "Reconnected to the running bridge."
+    try:
+        # A fresh lease replaces the stale one well before its timeout, so the watchdog stands down.
+        acquire_bridge_lease(context)
+    except Exception as ex:  # noqa: BLE001 - surfaced in state; retried by the heartbeat
+        state.last_error = str(ex)
+    return True
+
+
 def _pump_lazy_first_start(context) -> None:
     """Drive the one-time lazy bridge launch from the persistent heartbeat timer (main thread). The
     slow spawn runs on a worker; this only marshals its result back and writes state. No-op once the
@@ -904,6 +937,11 @@ def _pump_lazy_first_start(context) -> None:
     if state.bridge_is_running or _lazy_launch_failed:
         return
     if not panel_was_seen() or not _addon_auto_start_enabled(context):
+        return
+
+    # A bridge may already be running (state was reset by a .blend load) — adopt it, never spawn
+    # a duplicate onto the same port.
+    if _try_adopt_running_bridge(context):
         return
 
     try:
@@ -1150,7 +1188,16 @@ def _bridge_lease_timer() -> float:
 
 @bpy.app.handlers.persistent
 def _on_blend_load(_unused) -> None:
-    # When a .blend opens, default the render mode to the one that fits its output settings, so a still
+    # Opening a .blend replaces the WindowManager — our runtime state resets to defaults. Re-arm
+    # the one-shot session/seed latches so the heartbeat re-pulls sign-in/scope state and re-seeds
+    # the remembered preferences into the fresh state (the bridge itself keeps running and is
+    # re-adopted by _try_adopt_running_bridge).
+    global _session_state_synced_pid, _render_settings_seeded, _render_settings_target_seeded
+    _session_state_synced_pid = 0
+    _render_settings_seeded = False
+    _render_settings_target_seeded = False
+
+    # Default the render mode to the one that fits the scene's output settings, so a still
     # scene doesn't sit on Video (and vice versa). The user can still change it. The axes writes here
     # are PROGRAMMATIC — suppress preference persistence, or opening a still scene would erase a
     # remembered split=on from the bridge store.
@@ -1565,6 +1612,16 @@ class OUTWIT_OT_bridge_use_recommended_mode(Operator):
     bl_idname = "outwit.bridge_use_recommended_mode"
     bl_label = "Use Recommended Mode"
     bl_description = "Switch the render mode to the one that matches the scene's output settings"
+
+    @classmethod
+    def description(cls, context, properties):
+        # Dynamic tooltip: the hint label above may wrap/truncate — hovering the button shows the
+        # full recommendation.
+        try:
+            recommended = recommended_render_mode(context.scene)
+            return f"Switch the output selection to the recommended mode: {recommended}"
+        except Exception:
+            return cls.bl_description
 
     def execute(self, context):
         state = _get_runtime_state(context)

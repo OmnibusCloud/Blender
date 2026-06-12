@@ -22,11 +22,7 @@ from .bridge_dependency_policy import (
     get_simulation_cache_blocking_issue,
 )
 from .bridge_launcher import note_panel_visible
-from .bridge_engine_routing import (
-    recommended_render_mode,
-    render_mode_matches_recommendation,
-    scene_frame_count,
-)
+from .bridge_engine_routing import scene_frame_count
 from .bridge_status import (
     Phase,
     authorized_group_count,
@@ -388,12 +384,14 @@ def _draw_output(layout, context, state, view) -> None:
       reveals a frame range + Result: Sequence | Video (-> container/quality). These drive render_mode."""
     scene = context.scene
 
-    # Non-blocking nudge when the selection doesn't fit the scene's output (e.g. a video format on Image).
-    recommended = recommended_render_mode(scene)
-    if view.recommendation and not render_mode_matches_recommendation(state.render_mode, recommended):
-        hint = layout.row(align=True)
-        hint.label(text=f"Recommended: {_recommendation_label(view.recommendation)}", icon="INFO")
-        hint.operator("outwit.bridge_use_recommended_mode", text="Use")
+    # Non-blocking nudge when the selection doesn't fit the scene's output (e.g. a video format on
+    # Image). Wrapped like every other message — a one-row label truncated to "Recommend…"; plain
+    # labels cannot carry tooltips, so the full text lives in the lines + the button's description.
+    if view.recommendation:
+        _draw_message(layout, context,
+                      f"Recommended: {_recommendation_label(view.recommendation)}", icon="INFO")
+        hint = layout.row()
+        hint.operator("outwit.bridge_use_recommended_mode", text="Use recommended")
 
     layout.prop(state, "output_axis", expand=True)
 
