@@ -8,7 +8,7 @@ Status legend: ✅ done · 🟡 partial · ❌ not started.
 
 ---
 
-## A. Scene fidelity — output format / alpha / bit depth (PRODUCTION BLOCKER)
+## A. Scene fidelity — output format / alpha / bit depth — ✅ DONE (see section D; kept for history)
 
 Today the render output is effectively **8-bit PNG, RGB, no alpha**, regardless of what the artist set
 in Blender. The rich state (color management, world, compositing, materials) already travels inside the

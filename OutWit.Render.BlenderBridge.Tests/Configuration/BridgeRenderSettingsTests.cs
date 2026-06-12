@@ -52,6 +52,7 @@ namespace OutWit.Render.BlenderBridge.Tests.Configuration
             Assert.That(settings.AnimResult, Is.EqualTo("Sequence"));
             Assert.That(settings.VideoContainer, Is.Empty);
             Assert.That(settings.VideoCodec, Is.Empty);
+            Assert.That(settings.VideoCrf, Is.EqualTo(23));
             Assert.That(settings.LastGroupId, Is.Empty);
             Assert.That(settings.LastGroupName, Is.Empty);
         }

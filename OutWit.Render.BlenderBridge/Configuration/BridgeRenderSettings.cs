@@ -54,6 +54,10 @@ namespace OutWit.Render.BlenderBridge.Configuration
         [Setting("Render")]
         public virtual string VideoCodec { get; set; } = null!;
 
+        /// <summary>CRF quality for the CRF-driven video presets (ignored by ProRes).</summary>
+        [Setting("Render")]
+        public virtual int VideoCrf { get; set; }
+
         #endregion
 
         #region Target

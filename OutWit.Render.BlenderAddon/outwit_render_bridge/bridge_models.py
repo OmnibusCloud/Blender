@@ -222,6 +222,7 @@ class RenderSettingsResponse:
     anim_result: str = "Sequence"
     video_container: str = ""
     video_codec: str = ""
+    video_crf: int = 23
     last_group_id: str = ""
     last_group_name: str = ""
 
@@ -237,6 +238,7 @@ class RenderSettingsResponse:
             anim_result=str(_get_value(data, "AnimResult") or "Sequence"),
             video_container=str(_get_value(data, "VideoContainer") or ""),
             video_codec=str(_get_value(data, "VideoCodec") or ""),
+            video_crf=_get_int(data, "VideoCrf", 23),
             last_group_id=str(_get_value(data, "LastGroupId") or ""),
             last_group_name=str(_get_value(data, "LastGroupName") or ""),
         )
@@ -252,6 +254,7 @@ class RenderSettingsResponse:
             "AnimResult": self.anim_result or "",
             "VideoContainer": self.video_container or "",
             "VideoCodec": self.video_codec or "",
+            "VideoCrf": int(self.video_crf),
             "LastGroupId": self.last_group_id or "",
             "LastGroupName": self.last_group_name or "",
         }

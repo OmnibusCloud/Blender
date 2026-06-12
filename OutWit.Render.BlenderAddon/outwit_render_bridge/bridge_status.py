@@ -135,6 +135,11 @@ class Blocker:
 SUPPORTED_IMAGE_FORMATS = frozenset({"PNG", "OPEN_EXR", "OPEN_EXR_MULTILAYER", "JPEG", "TIFF", "WEBP"})
 _IMAGE_OUTPUT_MODES = frozenset({"Still", "StillTiled", "Frames"})
 
+# The ffmpeg tile stitcher (and the video intermediate-frame path) are verified for 8-bit PNG/JPEG
+# only — the server preflight enforces the same allowlist. Mirroring it locally turns a
+# launch-and-fail into a pre-launch blocker with a one-click fix.
+_STITCH_SAFE_FORMATS = frozenset({"PNG", "JPEG"})
+
 
 def _scene_image_format(scene) -> str:
     render = getattr(scene, "render", None)
@@ -455,11 +460,32 @@ def _primary_blocker(scene, state) -> Blocker | None:
         )
 
     image_format = _scene_image_format(scene)
-    if getattr(state, "render_mode", "Still") in _IMAGE_OUTPUT_MODES \
+    render_mode = getattr(state, "render_mode", "Still")
+    if render_mode in _IMAGE_OUTPUT_MODES \
             and image_format and image_format not in SUPPORTED_IMAGE_FORMATS:
         return Blocker(
             BlockerKind.SWITCH_FORMAT,
             f"Output format '{image_format}' is not supported — the farm renders PNG, EXR, JPEG, TIFF, or WebP.",
+            "Switch to PNG",
+            "outwit.bridge_switch_format_to_png",
+        )
+
+    # Mirror the server preflight allowlists LOCALLY so the artist sees the block before launching
+    # (previously the same message arrived only as a launch failure).
+    if render_mode == "StillTiled" and image_format and image_format not in _STITCH_SAFE_FORMATS:
+        return Blocker(
+            BlockerKind.SWITCH_FORMAT,
+            f"Tiled still renders PNG or JPEG only (the tile stitcher) — switch the format or "
+            "disable 'Split frame across machines'.",
+            "Switch to PNG",
+            "outwit.bridge_switch_format_to_png",
+        )
+
+    if render_mode == "Video" \
+            and image_format in SUPPORTED_IMAGE_FORMATS and image_format not in _STITCH_SAFE_FORMATS:
+        return Blocker(
+            BlockerKind.SWITCH_FORMAT,
+            "Video renders its frames as PNG or JPEG before encoding — switch the image format.",
             "Switch to PNG",
             "outwit.bridge_switch_format_to_png",
         )

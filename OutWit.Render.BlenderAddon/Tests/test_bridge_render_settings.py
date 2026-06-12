@@ -131,7 +131,7 @@ class SeedPropValuesTests(unittest.TestCase):
     def test_maps_bucket_one_values_to_state_props(self):
         settings = RenderSettingsResponse(
             split_frame=True, tiles_x=4, tiles_y=3, tile_overlap=16, anim_result="Video",
-            video_container="WEBM", video_codec="VP9")
+            video_container="WEBM", video_codec="VP9", video_crf=30)
 
         values = _LOGIC.seed_prop_values(settings)
 
@@ -142,6 +142,7 @@ class SeedPropValuesTests(unittest.TestCase):
             "tile_overlap_px": 16,
             "anim_result": "Video",
             "video_format": "WEBM_VP9",
+            "video_constant_rate_factor": 30,
         })
 
     def test_sanitizes_corrupt_values_against_prop_constraints(self):
@@ -201,6 +202,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             tile_overlap=0,
             anim_result="Video",
             video_format="WEBM_VP9",
+            video_crf=28,
             group_id="g-1",
             group_name="Studio GPUs",
         )
@@ -212,6 +214,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
         self.assertEqual(payload["AnimResult"], "Video")
         self.assertEqual(payload["VideoContainer"], "WEBM")
         self.assertEqual(payload["VideoCodec"], "VP9")
+        self.assertEqual(payload["VideoCrf"], 28)
         self.assertEqual(payload["LastGroupId"], "g-1")
         self.assertEqual(payload["LastGroupName"], "Studio GPUs")
 
@@ -225,6 +228,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             tile_overlap=8,
             anim_result="Sequence",
             video_format="MP4_H264",
+            video_crf=23,
             group_id="",
             group_name="",
         )

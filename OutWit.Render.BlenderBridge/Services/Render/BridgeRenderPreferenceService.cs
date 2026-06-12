@@ -30,6 +30,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
                 AnimResult = RenderSettings.AnimResult,
                 VideoContainer = RenderSettings.VideoContainer,
                 VideoCodec = RenderSettings.VideoCodec,
+                VideoCrf = RenderSettings.VideoCrf,
                 LastGroupId = RenderSettings.LastGroupId,
                 LastGroupName = RenderSettings.LastGroupName
             });
@@ -48,6 +49,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderSettings.AnimResult = renderSettings.AnimResult ?? "";
             RenderSettings.VideoContainer = renderSettings.VideoContainer ?? "";
             RenderSettings.VideoCodec = renderSettings.VideoCodec ?? "";
+            RenderSettings.VideoCrf = renderSettings.VideoCrf;
             RenderSettings.LastGroupId = renderSettings.LastGroupId ?? "";
             RenderSettings.LastGroupName = renderSettings.LastGroupName ?? "";
 

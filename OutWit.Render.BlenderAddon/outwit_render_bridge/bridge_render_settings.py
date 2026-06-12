@@ -59,6 +59,7 @@ def seed_prop_values(settings: RenderSettingsResponse) -> dict[str, Any]:
         "tile_overlap_px": max(0, int(settings.tile_overlap)),
         "anim_result": anim_result,
         "video_format": video_format_from_store(settings.video_container, settings.video_codec),
+        "video_constant_rate_factor": min(51, max(0, int(settings.video_crf))),
     }
 
 
@@ -111,6 +112,7 @@ def compose_sticky_payload(
     tile_overlap: int,
     anim_result: str,
     video_format: str,
+    video_crf: int,
     group_id: str,
     group_name: str,
 ) -> dict[str, Any]:
@@ -128,6 +130,7 @@ def compose_sticky_payload(
         "AnimResult": anim_result or "",
         "VideoContainer": container,
         "VideoCodec": codec,
+        "VideoCrf": int(video_crf),
         "LastGroupId": group_id or "",
         "LastGroupName": group_name or "",
     })

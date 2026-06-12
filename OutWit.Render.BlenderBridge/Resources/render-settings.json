@@ -7,7 +7,8 @@
     { "key": "TileOverlap", "value": "8", "valueKind": "Integer" },
     { "key": "AnimResult", "value": "Sequence", "valueKind": "String" },
     { "key": "VideoContainer", "value": "", "valueKind": "String" },
-    { "key": "VideoCodec", "value": "", "valueKind": "String" }
+    { "key": "VideoCodec", "value": "", "valueKind": "String" },
+    { "key": "VideoCrf", "value": "23", "valueKind": "Integer" }
   ],
   "Target": [
     { "key": "LastGroupId", "value": "", "valueKind": "String" },

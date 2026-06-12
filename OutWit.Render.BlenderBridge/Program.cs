@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -160,10 +160,11 @@ namespace OutWit.Render.BlenderBridge
 
         private static string ResolveLogPath(BridgeSettings settings)
         {
+            // Same per-user log home as the worker client (%appdata%/OmnibusCloud/Logs) so all
+            // OmnibusCloud components are discoverable in one place.
             var logDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "OutWit",
-                "Cloud",
+                "OmnibusCloud",
                 "Logs");
             Directory.CreateDirectory(logDirectory);
             return Path.Combine(logDirectory, "blender-bridge-.log");

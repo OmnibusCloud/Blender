@@ -61,7 +61,7 @@ def _can_load_result_image(state) -> bool:
         return False
 
     extension = os.path.splitext(state.download_primary_path)[1].lower()
-    return extension in {".png", ".jpg", ".jpeg", ".exr", ".bmp", ".tga", ".tif", ".tiff"}
+    return extension in {".png", ".jpg", ".jpeg", ".exr", ".bmp", ".tga", ".tif", ".tiff", ".webp"}
 
 
 def _blend_basename(state) -> str:

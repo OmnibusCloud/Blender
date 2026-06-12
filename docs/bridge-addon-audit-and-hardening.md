@@ -1,5 +1,19 @@
 # Bridge + Addon — audit & hardening plan (2026-06)
 
+> **CLOSED (2026-06-10 note): both headline gaps are fixed and live-verified.**
+> - **Finding 1 (group targeting)** — closed 2026-06-06. After the authorization diagnosis (see the
+>   *RESOLVED* section at the bottom of this doc) and the Render.Model 1.0.0→1.1.0 version-skew fix
+>   (`b69d5c2`, which also committed the live group tests + the REST error-surfacing fix), the addon
+>   Target dropdown was wired end-to-end (`054a170`) and **verified live**: the full bridge REST group
+>   path (`FramesTargetedAtClientGroup`) — submit accepted, 20/20 frames rendered on the target group,
+>   result downloaded.
+> - **Finding 2 (scene fidelity)** — closed 2026-06-08 (addon 0.1.1: `cfd19c8` real output format +
+>   colour mode/film transparency/bit depth, `a72c455` Render.Model 1.1.0→1.2.0, `5dd056a`). Recorded
+>   as *"done + live-verified (alpha/transparent/format)"* in
+>   `bridge-addon-responsiveness-audit.md` (status header).
+>
+> The body below is kept as the audit record.
+
 **Context.** The Blender addon + its C# bridge were built to the point of *"the process works"* (submit a
 scene, render in the cloud, get a result back). To make it **actually usable** — and specifically to be
 the front-end of the **crowdcomputing portal (OmnibusCloud), the first public case** — two functionality
@@ -188,4 +202,5 @@ routing / `List<RenderSceneAttachmentRefData>` serialization be exercised end-to
 because submit was rejected before reaching dispatch).
 
 **Remaining (unchanged):** addon group-selection UI (EnumProperty) → render operators; commit the live
-group tests + the REST-mask fix.
+group tests + the REST-mask fix. *(✅ done 2026-06-06: Target dropdown wired in `054a170` — live-verified,
+20/20 frames on the group; live tests + REST fix committed in `b69d5c2`. See the closure note at the top.)*

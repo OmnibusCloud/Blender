@@ -1160,6 +1160,7 @@ def _push_render_settings(context) -> None:
         tile_overlap=int(state.tile_overlap_px),
         anim_result=state.anim_result,
         video_format=getattr(state, "video_format", ""),
+        video_crf=int(state.video_constant_rate_factor),
         group_id=group_id,
         group_name=group_name_for(groups, group_id),
     ))

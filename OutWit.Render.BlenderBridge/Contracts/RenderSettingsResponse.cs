@@ -27,6 +27,7 @@ namespace OutWit.Render.BlenderBridge.Contracts
                    && AnimResult.Is(other.AnimResult)
                    && VideoContainer.Is(other.VideoContainer)
                    && VideoCodec.Is(other.VideoCodec)
+                   && VideoCrf.Is(other.VideoCrf)
                    && LastGroupId.Is(other.LastGroupId)
                    && LastGroupName.Is(other.LastGroupName);
         }
@@ -43,6 +44,7 @@ namespace OutWit.Render.BlenderBridge.Contracts
                 AnimResult = AnimResult,
                 VideoContainer = VideoContainer,
                 VideoCodec = VideoCodec,
+                VideoCrf = VideoCrf,
                 LastGroupId = LastGroupId,
                 LastGroupName = LastGroupName
             };
@@ -67,6 +69,8 @@ namespace OutWit.Render.BlenderBridge.Contracts
         public string VideoContainer { get; set; } = "";
 
         public string VideoCodec { get; set; } = "";
+
+        public int VideoCrf { get; set; } = 23;
 
         public string LastGroupId { get; set; } = "";
 

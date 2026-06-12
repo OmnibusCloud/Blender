@@ -202,6 +202,22 @@ def _still_frame_set(self, value: int) -> None:
         scene.frame_current = max(1, int(value))
 
 
+# Video FPS is bucket 2 ("derive from the scene"): it binds to scene.render.fps, so it persists
+# in the .blend — an unbound IntProperty reset to 24 every session was the same class of bug as
+# the unbound still Frame.
+def _video_fps_get(self) -> int:
+    scene = getattr(bpy.context, "scene", None)
+    render = getattr(scene, "render", None)
+    return max(1, int(getattr(render, "fps", 24) or 24)) if render is not None else 24
+
+
+def _video_fps_set(self, value: int) -> None:
+    scene = getattr(bpy.context, "scene", None)
+    render = getattr(scene, "render", None)
+    if render is not None:
+        render.fps = max(1, int(value))
+
+
 def _output_format_get(self) -> int:
     fmt = _scene_file_format()
     if not fmt:
@@ -326,8 +342,22 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     tiles_x: IntProperty(name="Tiles X", default=2, min=1, update=_mark_render_settings_changed_and_invalidate)
     tiles_y: IntProperty(name="Tiles Y", default=2, min=1, update=_mark_render_settings_changed_and_invalidate)
     tile_overlap_px: IntProperty(name="Tile Overlap Px", default=8, min=0, update=_mark_render_settings_changed_and_invalidate)
-    video_frame_rate: IntProperty(name="Video Frame Rate", default=24, min=1, update=_invalidate_preflight)
-    video_constant_rate_factor: IntProperty(name="Video Constant Rate Factor", default=23, min=0, max=51, update=_invalidate_preflight)
+    video_frame_rate: IntProperty(
+        name="Video Frame Rate",
+        description="Output frame rate — the scene's FPS (stored in the .blend)",
+        default=24,
+        min=1,
+        get=_video_fps_get,
+        set=_video_fps_set,
+        update=_mark_scene_modified_and_invalidate,
+    )
+    video_constant_rate_factor: IntProperty(
+        name="Video Constant Rate Factor",
+        default=23,
+        min=0,
+        max=51,
+        update=_mark_render_settings_changed_and_invalidate,
+    )
     # Container+codec PRESET (one control instead of two axes — invalid combos unrepresentable).
     # Bucket 1: persisted on the bridge as the VideoContainer/VideoCodec pair.
     video_format: EnumProperty(

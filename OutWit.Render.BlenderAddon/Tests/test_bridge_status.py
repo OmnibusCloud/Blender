@@ -334,11 +334,31 @@ class UnsupportedFormatBlockerTests(unittest.TestCase):
         view = status.compute_status(make_scene(file_format="BMP"), make_state(render_mode="Frames"))
         self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT)
 
-    def test_video_mode_ignores_image_format(self):
-        # Video encodes to a container; the per-frame image format is intermediate, not the deliverable.
-        view = status.compute_status(make_scene(file_format="TIFF"), make_state(render_mode="Video"))
+    def test_video_mode_with_video_scene_format_does_not_block(self):
+        # A video-configured scene (FFMPEG) in Video mode: frames fall back to PNG — no block.
+        view = status.compute_status(make_scene(file_format="FFMPEG"), make_state(render_mode="Video"))
         self.assertNotEqual(view.blocker.kind if view.blocker else status.BlockerKind.NONE,
                             status.BlockerKind.SWITCH_FORMAT)
+
+    def test_video_mode_blocks_non_stitch_safe_image_formats(self):
+        # Mirrors the server preflight allowlist: video intermediates render as PNG/JPEG only.
+        for fmt in ("TIFF", "WEBP", "OPEN_EXR"):
+            view = status.compute_status(make_scene(file_format=fmt), make_state(render_mode="Video"))
+            self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT, fmt)
+            self.assertTrue(view.blocker.has_fix, fmt)
+
+    def test_tiled_mode_blocks_non_stitch_safe_formats_locally(self):
+        # The tile stitcher is PNG/JPEG only — the artist sees the block BEFORE launching now.
+        for fmt in ("TIFF", "WEBP", "OPEN_EXR"):
+            view = status.compute_status(make_scene(file_format=fmt), make_state(render_mode="StillTiled"))
+            self.assertEqual(view.blocker.kind, status.BlockerKind.SWITCH_FORMAT, fmt)
+            self.assertTrue(view.blocker.has_fix, fmt)
+
+    def test_tiled_mode_allows_png_and_jpeg(self):
+        for fmt in ("PNG", "JPEG"):
+            view = status.compute_status(make_scene(file_format=fmt), make_state(render_mode="StillTiled"))
+            self.assertNotEqual(view.blocker.kind if view.blocker else status.BlockerKind.NONE,
+                                status.BlockerKind.SWITCH_FORMAT, fmt)
 
 
 class TargetResolutionTests(unittest.TestCase):
