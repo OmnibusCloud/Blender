@@ -28,9 +28,9 @@ from .bridge_dependency_policy import (
     resolve_bake_plan,
 )
 from .bridge_engine_routing import (
-    recommended_render_mode,
     render_mode_matches_recommendation,
     scene_frame_count,
+    suggested_render_mode,
 )
 
 
@@ -562,7 +562,7 @@ def _recommendation(scene, state) -> str:
     """A non-blocking nudge: the recommended render mode when the current selection mismatches
     (e.g. a video output format while a still mode is selected). Empty when the selection fits."""
     try:
-        recommended = recommended_render_mode(scene)
+        recommended = suggested_render_mode(scene)
     except Exception:
         return ""
     current = getattr(state, "render_mode", "Still")

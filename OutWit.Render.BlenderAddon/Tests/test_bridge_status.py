@@ -39,9 +39,23 @@ def _load_bridge_status():
             return True
         return recommended == "Still" and current == "StillTiled"
 
+    def scene_frame_count(scene):
+        return int(scene.frame_end) - int(scene.frame_start) + 1
+
+    def suggested_render_mode(scene):
+        # Frame-count aware nudge (matches the real bridge_engine_routing.suggested_render_mode).
+        image_settings = getattr(getattr(scene, "render", None), "image_settings", None)
+        fmt = getattr(image_settings, "file_format", "") if image_settings is not None else ""
+        if fmt in _VIDEO_FORMATS:
+            return "Video"
+        if scene_frame_count(scene) > 1:
+            return "Frames"
+        return "Still"
+
     routing.recommended_render_mode = recommended_render_mode
+    routing.suggested_render_mode = suggested_render_mode
     routing.render_mode_matches_recommendation = render_mode_matches_recommendation
-    routing.scene_frame_count = lambda scene: int(scene.frame_end) - int(scene.frame_start) + 1
+    routing.scene_frame_count = scene_frame_count
     sys.modules[_PKG + ".bridge_engine_routing"] = routing
 
     deps = types.ModuleType(_PKG + ".bridge_dependency_policy")
@@ -254,6 +268,14 @@ class ComputeStatusTests(unittest.TestCase):
     def test_no_recommendation_when_mode_matches(self):
         view = status.compute_status(make_scene(file_format="PNG"), make_state(render_mode="Still"))
         self.assertEqual(view.recommendation, "")
+
+    def test_multiframe_image_scene_on_still_is_nudged_to_frames(self):
+        # A multi-frame image scene (e.g. a baked simulation, PNG, 1-150) sitting on the safe Still
+        # default must be nudged toward Frames so it isn't silently rendered as a single frame.
+        view = status.compute_status(
+            make_scene(file_format="PNG", frame_start=1, frame_end=150),
+            make_state(render_mode="Still"))
+        self.assertEqual(view.recommendation, "Frames")
 
     # --- job phases (server-sourced, authoritative) ---
 

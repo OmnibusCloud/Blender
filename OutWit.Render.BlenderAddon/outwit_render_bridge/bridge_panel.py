@@ -417,8 +417,12 @@ def _draw_connection_gate(layout, context, state, view) -> None:
 
 
 def _recommendation_label(recommended: str) -> str:
-    # recommended_render_mode only ever returns "Still" or "Video".
-    return "Animation · Video" if recommended == "Video" else "Image"
+    # suggested_render_mode returns "Still", "Frames", or "Video".
+    if recommended == "Video":
+        return "Animation · Video"
+    if recommended == "Frames":
+        return "Animation · Image sequence"
+    return "Image"
 
 
 def _draw_output(layout, context, state, view) -> None:

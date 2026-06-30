@@ -24,6 +24,7 @@ from .bridge_engine_routing import (
     recommended_render_mode,
     scene_frame_count,
     SceneEngineRoutingError,
+    suggested_render_mode,
 )
 from .bridge_launcher import (
     acquire_bridge_lease,
@@ -2175,14 +2176,14 @@ class OUTWIT_OT_bridge_use_recommended_mode(Operator):
         # Dynamic tooltip: the hint label above may wrap/truncate — hovering the button shows the
         # full recommendation.
         try:
-            recommended = recommended_render_mode(context.scene)
+            recommended = suggested_render_mode(context.scene)
             return f"Switch the output selection to the recommended mode: {recommended}"
         except Exception:
             return cls.bl_description
 
     def execute(self, context):
         state = _get_runtime_state(context)
-        state.render_mode = recommended_render_mode(context.scene)
+        state.render_mode = suggested_render_mode(context.scene)
         apply_render_mode_to_axes(state)
         self.report({"INFO"}, f"Render mode set to {state.render_mode}.")
         return {"FINISHED"}

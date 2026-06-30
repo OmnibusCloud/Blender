@@ -75,6 +75,31 @@ def has_multi_frame_range(scene: bpy.types.Scene) -> bool:
     return scene_frame_count(scene) > 1
 
 
+def suggested_render_mode(scene: bpy.types.Scene) -> str:
+    """The mode to NUDGE the artist toward (panel hint + 'Use recommended mode' button) — unlike
+    recommended_render_mode, this is FRAME-COUNT aware:
+      - a video output format -> "Video";
+      - a multi-frame image scene -> "Frames" (render the range as an image sequence);
+      - otherwise -> "Still".
+
+    Kept SEPARATE from recommended_render_mode (the safe auto-default applied on open) on purpose: the
+    auto-default must never auto-pick an expensive Frames run from a wide default range (the 0.4.1
+    lesson), but the artist SHOULD be nudged toward Frames for a real animation/simulation that would
+    otherwise silently render a single frame. The nudge is one click away, and the large-frame launch
+    confirmation still guards against an accidental huge range."""
+    render = getattr(scene, "render", None)
+    image_settings = getattr(render, "image_settings", None) if render is not None else None
+    file_format = (getattr(image_settings, "file_format", "") or "") if image_settings is not None else ""
+
+    if file_format in _VIDEO_FILE_FORMATS:
+        return "Video"
+
+    if has_multi_frame_range(scene):
+        return "Frames"
+
+    return "Still"
+
+
 def render_mode_matches_recommendation(current_mode: str, recommended_mode: str) -> bool:
     """Whether the selected mode is an acceptable fit for the recommendation (tiled-still counts as a
     valid specialization of Still, so picking it doesn't trigger a 'wrong mode' hint)."""

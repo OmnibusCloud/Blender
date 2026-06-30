@@ -102,6 +102,7 @@ def _load_bridge_operators_module():
     bridge_engine_module.detect_scene_engine_family = lambda _scene: ("Cycles", 0)
     bridge_engine_module.get_scene_engine_token = lambda _scene: "CYCLES"
     bridge_engine_module.recommended_render_mode = lambda _scene: "Still"
+    bridge_engine_module.suggested_render_mode = lambda _scene: "Still"
     bridge_engine_module.render_mode_matches_recommendation = lambda current, recommended: current == recommended
     bridge_engine_module.scene_frame_count = lambda _scene: 1
     bridge_engine_module.SceneEngineRoutingError = SceneEngineRoutingError
