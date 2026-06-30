@@ -291,6 +291,11 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     uploaded_source_mtime: StringProperty(name="Uploaded Source Mtime", default="")
     uploaded_file_name: StringProperty(name="Uploaded File Name", default="")
     uploaded_file_size: IntProperty(name="Uploaded File Size", default=0)
+    # Local-bake ("On this computer") transient state: whether a modal bake is running, and the JSON
+    # manifest of fluid-cache attachments collected from the locally-baked scene (already uploaded, so
+    # the launch merges them into the upload manifest without re-uploading).
+    local_bake_in_progress: BoolProperty(name="Local Bake In Progress", default=False)
+    local_bake_fluid_manifest_json: StringProperty(name="Local Bake Fluid Manifest Json", default="")
     uploaded_attachment_manifest_json: StringProperty(name="Uploaded Attachment Manifest Json", default="")
     upload_message: StringProperty(name="Upload Message", default="")
     dependency_plan_total_count: IntProperty(name="Dependency Plan Total Count", default=0)

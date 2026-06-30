@@ -1485,6 +1485,284 @@ def _scan_scene_simulations(scene):
     return summarize_simulations(descriptors)
 
 
+# region Local bake ("On this computer" strategy)
+#
+# Bake the scene's simulations in the artist's running Blender, then upload the BAKED scene + collected
+# fluid caches and render through the PLAIN Render* path (no delegated bake). Replicates the controller's
+# Render.BakeSimulation recipe EXACTLY (free-before-bake, OpenVDB + cache_type='ALL' for fluid, memory for
+# point caches, PACKED for Geometry-Nodes zones) so a locally-baked scene slices the same way on the farm.
+# Bakes in place and saves the .blend (the meaning of "bake locally"; delegated is the no-touch path).
+
+
+def _save_mainfile() -> None:
+    bpy.ops.wm.save_mainfile()
+
+
+def _local_fluid_domains(scene):
+    """(object, domain_settings, is_liquid) for every Mantaflow fluid DOMAIN in the scene."""
+    domains = []
+    for obj in getattr(scene, "objects", []):
+        for modifier in getattr(obj, "modifiers", []):
+            if getattr(modifier, "type", "") == "FLUID" and getattr(modifier, "fluid_type", "") == "DOMAIN":
+                domain = getattr(modifier, "domain_settings", None)
+                if domain is not None:
+                    domains.append((obj, domain, getattr(domain, "domain_type", "") == "LIQUID"))
+    return domains
+
+
+def _configure_fluid_domain(obj, domain, index: int, start_frame: int, end_frame: int) -> None:
+    # Unique in-blend-dir cache per domain (avoids name collisions / escaping paths); OpenVDB density grid
+    # + cache_type='ALL' so every frame is written; bake from the sim's natural start (a liquid mesh only
+    # displays from a cache contiguous from the start) up to the render end.
+    sanitized = re.sub(r"[^A-Za-z0-9_]", "_", obj.name)
+    domain.cache_directory = "//cache_%d_%s" % (index, sanitized)
+    domain.cache_data_format = "OPENVDB"
+    domain.cache_type = "ALL"
+    existing_start = int(getattr(domain, "cache_frame_start", 1) or 1)
+    domain.cache_frame_start = max(1, min(existing_start, start_frame))
+    domain.cache_frame_end = max(domain.cache_frame_start, end_frame)
+    if hasattr(domain, "cache_noise_format"):
+        try:
+            domain.cache_noise_format = "OPENVDB"
+        except Exception:
+            pass
+
+
+def _bake_fluid_domain(obj) -> None:
+    # Free any stale/existing bake first — fluid.bake_all on an already-baked domain ships the OLD cache
+    # (the same frozen-stale failure fixed for point caches); free_all forces a clean re-bake.
+    with bpy.context.temp_override(active_object=obj, selected_objects=[obj], object=obj):
+        try:
+            bpy.ops.fluid.free_all()
+        except Exception:
+            pass
+        bpy.ops.fluid.bake_all()
+
+
+def _bake_point_caches() -> None:
+    # Cloth / soft body / dynamic paint / particles / rigid body → bake to MEMORY (embedded in the .blend
+    # on save → self-contained, no per-frame attachments). Free first so a stale/flagged cache re-bakes
+    # instead of staying frozen.
+    for obj in bpy.data.objects:
+        for modifier in getattr(obj, "modifiers", []):
+            point_cache = getattr(modifier, "point_cache", None)
+            if point_cache is not None:
+                try:
+                    point_cache.use_disk_cache = False
+                except Exception:
+                    pass
+    try:
+        bpy.ops.ptcache.free_bake_all()
+    except Exception:
+        pass
+    bpy.ops.ptcache.bake_all(bake=True)
+
+
+def _geometry_nodes_bake_objects(scene):
+    """Objects with a Geometry-Nodes simulation zone, configured to bake PACKED over the animation."""
+    objects = []
+    for obj in getattr(scene, "objects", []):
+        for modifier in getattr(obj, "modifiers", []):
+            if getattr(modifier, "type", "") == "NODES" and _has_geometry_nodes_simulation(modifier):
+                try:
+                    modifier.bake_target = "PACKED"
+                    for bake in modifier.bakes:
+                        bake.bake_mode = "ANIMATION"
+                    if obj not in objects:
+                        objects.append(obj)
+                except Exception:
+                    continue
+    return objects
+
+
+def _bake_geometry_nodes(obj) -> None:
+    # Delete any existing GN bake first — simulation_nodes_cache_bake skips already-baked zones (ships the
+    # stale PACKED bake), so a pre-baked scene would otherwise stay frozen.
+    with bpy.context.temp_override(active_object=obj, selected_objects=[obj], object=obj):
+        try:
+            bpy.ops.object.simulation_nodes_cache_delete(selected=True)
+        except Exception:
+            pass
+        bpy.ops.object.simulation_nodes_cache_bake(selected=True)
+
+
+def _scene_has_point_cache_sim(scene) -> bool:
+    from .bridge_simulation import SIM_CLOTH, SIM_DYNAMIC_PAINT, SIM_PARTICLES, SIM_RIGID_BODY, SIM_SOFT_BODY
+
+    point_cache_kinds = {SIM_CLOTH, SIM_SOFT_BODY, SIM_DYNAMIC_PAINT, SIM_PARTICLES, SIM_RIGID_BODY}
+    return any(kind in point_cache_kinds for kind in _scan_scene_simulations(scene).kinds)
+
+
+def _local_bake_step_plan(scene, start_frame: int, end_frame: int):
+    """Ordered (label, action) bake steps. The modal operator runs one per timer tick so the panel shows
+    progress and Esc can cancel between steps (each individual bake is blocking)."""
+    steps = []
+
+    domains = _local_fluid_domains(scene)
+    if domains:
+        def _configure_all_domains():
+            for index, (obj, domain, _is_liquid) in enumerate(domains):
+                _configure_fluid_domain(obj, domain, index, start_frame, end_frame)
+            _save_mainfile()
+
+        steps.append(("Configuring fluid domains", _configure_all_domains))
+        for obj, _domain, _is_liquid in domains:
+            steps.append((f"Baking fluid: {obj.name}", (lambda captured=obj: _bake_fluid_domain(captured))))
+
+    if _scene_has_point_cache_sim(scene):
+        steps.append(("Baking point-cache simulations (cloth/particles/soft body/…)", _bake_point_caches))
+
+    for obj in _geometry_nodes_bake_objects(scene):
+        steps.append((f"Baking geometry nodes: {obj.name}", (lambda captured=obj: _bake_geometry_nodes(captured))))
+
+    steps.append(("Saving baked scene", _save_mainfile))
+    return steps
+
+
+def _collect_local_fluid_cache_attachments(scene, client) -> list[dict[str, object]]:
+    """Upload every baked fluid cache file and build its FluidCache attachment entry (frame-tagged exactly
+    like the controller — gas density per-frame, liquid/noise/config whole). Point-cache + GN bakes are
+    self-contained in the saved .blend and need no attachments."""
+    from .bridge_local_bake import build_fluid_cache_attachment
+
+    blend_dir = os.path.dirname(bpy.data.filepath or "")
+    if not blend_dir:
+        return []
+
+    attachments: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for _obj, domain, is_liquid in _local_fluid_domains(scene):
+        cache_dir = str(getattr(domain, "cache_directory", "") or "")
+        if cache_dir.startswith("//"):
+            cache_dir = os.path.join(blend_dir, cache_dir[2:])
+        cache_dir = bpy.path.abspath(cache_dir) if cache_dir else ""
+        if not cache_dir or not os.path.isdir(cache_dir):
+            continue
+
+        for root, _dirs, files in os.walk(cache_dir):
+            for filename in files:
+                full = os.path.join(root, filename)
+                rel = os.path.relpath(full, blend_dir).replace("\\", "/")
+                if rel in seen:
+                    continue
+                seen.add(rel)
+                response = client.upload_file(full)
+                attachments.append(build_fluid_cache_attachment(rel, is_liquid, response.blob_id))
+
+    return attachments
+
+
+class OUTWIT_OT_bridge_bake_local(Operator):
+    bl_idname = "outwit.bridge_bake_local"
+    bl_label = "Bake Simulation Locally"
+    bl_description = ("Bake this scene's simulations in Blender and save the .blend, so the baked scene "
+                      "renders distributed without a farm bake")
+
+    _timer = None
+    _steps: list = []
+    _index = 0
+    _announced = -1
+
+    def invoke(self, context, event):
+        if not (bpy.data.filepath or ""):
+            self.report({"ERROR"}, "Save the .blend before baking locally.")
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Bake the scene's simulations into this .blend?", icon="PHYSICS")
+        layout.label(text="This replaces the current baked state and SAVES the file.")
+        layout.label(text="(Choose 'On render farm' instead to bake without touching this file.)")
+
+    def execute(self, context):
+        state = _get_runtime_state(context)
+        scene = context.scene
+
+        self._steps = _local_bake_step_plan(scene, int(scene.frame_start), int(scene.frame_end))
+        self._index = 0
+        self._announced = -1
+        state.local_bake_in_progress = True
+        state.last_error = ""
+        state.status_message = "Baking locally…"
+        self._timer = context.window_manager.event_timer_add(0.15, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        _tag_job_areas_redraw()
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type == "ESC":
+            return self._cancel(context, "Local bake cancelled.")
+
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        state = _get_runtime_state(context)
+
+        if self._index >= len(self._steps):
+            return self._finish(context)
+
+        label, action = self._steps[self._index]
+
+        # Announce the step (and let the panel repaint) one tick BEFORE running the blocking bake.
+        if self._announced != self._index:
+            state.status_message = f"Baking… {label} ({self._index + 1}/{len(self._steps)})"
+            self._announced = self._index
+            _tag_job_areas_redraw()
+            return {"RUNNING_MODAL"}
+
+        try:
+            action()
+        except Exception as ex:
+            state.last_error = str(ex)
+            return self._cancel(context, f"Local bake failed: {ex}", level="ERROR")
+
+        self._index += 1
+        return {"RUNNING_MODAL"}
+
+    def _finish(self, context):
+        state = _get_runtime_state(context)
+        self._cleanup(context)
+
+        fluid_attachments: list[dict[str, object]] = []
+        try:
+            client = _get_bridge_client(context)
+            fluid_attachments = _collect_local_fluid_cache_attachments(context.scene, client)
+        except Exception as ex:
+            state.local_bake_in_progress = False
+            state.last_error = str(ex)
+            state.status_message = f"Baked, but collecting fluid caches failed: {ex}"
+            self.report({"ERROR"}, state.status_message)
+            _tag_job_areas_redraw()
+            return {"CANCELLED"}
+
+        state.local_bake_fluid_manifest_json = json.dumps(fluid_attachments, ensure_ascii=False)
+        state.local_bake_in_progress = False
+        _refresh_bridge_state(context)  # re-scan: the simulation now reads as baked
+        state.status_message = (f"Local bake complete ({len(fluid_attachments)} fluid cache file(s) collected)."
+                                if fluid_attachments else "Local bake complete.")
+        self.report({"INFO"}, state.status_message)
+        _tag_job_areas_redraw()
+        return {"FINISHED"}
+
+    def _cancel(self, context, message: str, level: str = "WARNING"):
+        state = _get_runtime_state(context)
+        self._cleanup(context)
+        state.local_bake_in_progress = False
+        state.status_message = message
+        self.report({level}, message)
+        _tag_job_areas_redraw()
+        return {"CANCELLED"}
+
+    def _cleanup(self, context) -> None:
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+
+
+# endregion
+
+
 def _refresh_bridge_state(context) -> None:
     state = _get_runtime_state(context)
     scene = context.scene
@@ -2305,6 +2583,7 @@ CLASSES = (
     OUTWIT_OT_bridge_validate_blend,
     OUTWIT_OT_bridge_run_preflight,
     OUTWIT_OT_bridge_use_recommended_mode,
+    OUTWIT_OT_bridge_bake_local,
     OUTWIT_OT_bridge_launch_render,
     OUTWIT_OT_bridge_refresh_job,
     OUTWIT_OT_bridge_cancel_job,
