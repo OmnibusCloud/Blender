@@ -1650,6 +1650,19 @@ def _scene_has_point_cache_sim(scene) -> bool:
     return any(kind in point_cache_kinds for kind in _scan_scene_simulations(scene).kinds)
 
 
+def _local_bake_frame_range(context) -> tuple[int, int]:
+    """The frame range a local bake must cover for the selected render mode: a single frame for the still
+    modes, the scene range for the animation modes. (The fluid bake still starts from the sim's natural
+    start in _configure_fluid_domain for a contiguous cache; this is the END the render needs and the
+    window whose gas-density caches are uploaded.)"""
+    state = _get_runtime_state(context)
+    scene = context.scene
+    if (getattr(state, "render_mode", "Still") or "Still") in ("Still", "StillTiled"):
+        frame = _get_still_frame(context)
+        return frame, frame
+    return int(scene.frame_start), int(scene.frame_end)
+
+
 def _local_bake_step_plan(scene, start_frame: int, end_frame: int):
     """Ordered (label, action) bake steps. The modal operator runs one per timer tick so the panel shows
     progress and Esc can cancel between steps (each individual bake is blocking)."""
@@ -1676,11 +1689,14 @@ def _local_bake_step_plan(scene, start_frame: int, end_frame: int):
     return steps
 
 
-def _collect_local_fluid_cache_attachments(scene, client) -> list[dict[str, object]]:
-    """Upload every baked fluid cache file and build its FluidCache attachment entry (frame-tagged exactly
-    like the controller — gas density per-frame, liquid/noise/config whole). Point-cache + GN bakes are
-    self-contained in the saved .blend and need no attachments."""
-    from .bridge_local_bake import build_fluid_cache_attachment
+def _collect_local_fluid_cache_attachments(scene, client, start_frame: int, end_frame: int) -> list[dict[str, object]]:
+    """Upload the baked fluid cache files within the render range and build their FluidCache attachment
+    entries (frame-tagged exactly like the controller — gas density per-frame, liquid/noise/config whole).
+    Per-frame gas-density caches OUTSIDE [start_frame, end_frame] are skipped (the bake covers the sim's
+    natural start for a contiguous liquid cache, but those early frames never render — mirrors the
+    controller's WitActivityAdapterRenderBakeSimulation filter). Point-cache + GN bakes are self-contained
+    in the saved .blend and need no attachments."""
+    from .bridge_local_bake import build_fluid_cache_attachment, fluid_cache_frame
 
     blend_dir = os.path.dirname(bpy.data.filepath or "")
     if not blend_dir:
@@ -1692,7 +1708,6 @@ def _collect_local_fluid_cache_attachments(scene, client) -> list[dict[str, obje
         cache_dir = str(getattr(domain, "cache_directory", "") or "")
         if cache_dir.startswith("//"):
             cache_dir = os.path.join(blend_dir, cache_dir[2:])
-        cache_dir = bpy.path.abspath(cache_dir) if cache_dir else ""
         if not cache_dir or not os.path.isdir(cache_dir):
             continue
 
@@ -1703,6 +1718,11 @@ def _collect_local_fluid_cache_attachments(scene, client) -> list[dict[str, obje
                 if rel in seen:
                     continue
                 seen.add(rel)
+
+                frame = fluid_cache_frame(filename, is_liquid)
+                if frame is not None and (frame < start_frame or frame > end_frame):
+                    continue
+
                 response = client.upload_file(full)
                 attachments.append(build_fluid_cache_attachment(rel, is_liquid, response.blob_id))
 
@@ -1723,6 +1743,8 @@ class OUTWIT_OT_bridge_bake_local(Operator):
     _steps: list = []
     _index = 0
     _announced = -1
+    _bake_start_frame = 1
+    _bake_end_frame = 1
 
     def invoke(self, context, event):
         if not (bpy.data.filepath or ""):
@@ -1734,13 +1756,15 @@ class OUTWIT_OT_bridge_bake_local(Operator):
         layout = self.layout
         layout.label(text="Bake the scene's simulations into this .blend?", icon="PHYSICS")
         layout.label(text="This replaces the current baked state and SAVES the file.")
+        layout.label(text="Point-cache sims (cloth/particles/…) are switched to memory cache.")
         layout.label(text="(Choose 'On render farm' instead to bake without touching this file.)")
 
     def execute(self, context):
         state = _get_runtime_state(context)
         scene = context.scene
 
-        self._steps = _local_bake_step_plan(scene, int(scene.frame_start), int(scene.frame_end))
+        self._bake_start_frame, self._bake_end_frame = _local_bake_frame_range(context)
+        self._steps = _local_bake_step_plan(scene, self._bake_start_frame, self._bake_end_frame)
         self._index = 0
         self._announced = -1
         state.local_bake_in_progress = True
@@ -1792,7 +1816,8 @@ class OUTWIT_OT_bridge_bake_local(Operator):
         fluid_attachments: list[dict[str, object]] = []
         try:
             client = _get_bridge_client(context)
-            fluid_attachments = _collect_local_fluid_cache_attachments(context.scene, client)
+            fluid_attachments = _collect_local_fluid_cache_attachments(
+                context.scene, client, self._bake_start_frame, self._bake_end_frame)
         except Exception as ex:
             state.local_bake_in_progress = False
             state.last_error = str(ex)
@@ -2389,11 +2414,21 @@ class OUTWIT_OT_bridge_launch_render(Operator):
                 # validates and renders the BAKED scene. The plain-scene preflight is skipped by design —
                 # it would re-flag the very simulation we are about to bake.
                 response = _run_selected_launch(context, bake=True)
-            elif bake_plan.should_local:
-                # Local bake already ran in this Blender before upload — the uploaded scene IS baked, so it
-                # renders through the PLAIN Render* path with the collected fluid caches. Preflight is
-                # skipped: it can false-flag an already-baked Geometry-Nodes zone (no bake-state flag).
+            elif bake_plan.should_local and _local_bake_is_current(state):
+                # Local bake already ran in this Blender for THIS exact .blend — the uploaded scene IS
+                # baked, so it renders through the PLAIN Render* path with the collected fluid caches.
+                # Preflight is skipped: it can false-flag an already-baked Geometry-Nodes zone (no
+                # bake-state flag). The _local_bake_is_current guard is the safety net: should_local keys
+                # on the cloud validator, but the local bake keys on the local scan — if they ever
+                # disagree and no local bake actually ran, we must NOT render unbaked.
                 response = _run_selected_launch(context, bake=False)
+            elif bake_plan.should_local:
+                # LOCAL was chosen and the validator still flags a simulation, but no local bake ran for
+                # this file (the local scan and the cloud validator disagreed). Never render unbaked: fall
+                # back to a delegated farm bake (also a valid bake plan), and say so.
+                state.status_message = "Local bake state not found — baking on the render farm instead."
+                self.report({"WARNING"}, state.status_message)
+                response = _run_selected_launch(context, bake=True)
             else:
                 _run_preflight(context)
                 if not _selected_mode_is_ready(state):

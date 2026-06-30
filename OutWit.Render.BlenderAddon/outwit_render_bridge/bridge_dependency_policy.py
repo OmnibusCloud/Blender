@@ -124,12 +124,11 @@ LOCAL_BAKE_UNAVAILABLE_MESSAGE = (
     "simulation before rendering."
 )
 
-# Feature gate for the LOCAL bake strategy. Delegated baking (on the fastest node, via
-# ``Render.BakeSimulation`` + ``Grid.Delegate``) is the shipped default and is always available; the
-# local-bake driver (a modal bake in the artist's Blender with native progress, plus a fluid-cache
-# collector) lands in a later step. Until then ``resolve_bake_plan`` refuses a LOCAL choice for an
-# unbaked simulation rather than silently delegating or — worse — rendering it unbaked. Flip to
-# ``True`` once the local driver ships. Lives here (not in bridge_simulation) so the bpy-free gate
+# Feature gate for the LOCAL bake strategy ("On this computer"): the modal bake driver +
+# fluid-cache collector in bridge_operators. Now shipped, so the flag is True and ``resolve_bake_plan``
+# lets a LOCAL choice cover an unbaked simulation. Kept as a flag (rather than removed) so the path can
+# be disabled if a platform regression is found, and so the unit tests can exercise both states via the
+# explicit ``local_bake_available`` parameter. Lives here (not in bridge_simulation) so the bpy-free gate
 # in operators/status/panel can read it without importing the bpy-adjacent scan module.
 LOCAL_BAKE_AVAILABLE = True
 

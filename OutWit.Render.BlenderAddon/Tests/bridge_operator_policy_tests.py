@@ -1117,12 +1117,15 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertIn(({"INFO"}, "BakeAndRenderStill launched successfully."), operator.report_calls)
 
     def test_launch_operator_local_bake_renders_plain_not_delegated(self) -> None:
-        # LOCAL strategy: the scene is baked locally before upload, so the launch must take the PLAIN
-        # Render* path (bake=False) — never BakeAndRender* (which would re-bake on the farm). (The
-        # stub scene has no live sim objects, so the pre-upload bake step is skipped here; this exercises
-        # the post-upload routing for a LOCAL-baked scene the validator still flags.)
+        # LOCAL strategy with a local bake already done for THIS .blend: the launch takes the PLAIN
+        # Render* path (bake=False), never BakeAndRender* (which would re-bake on the farm).
         state = _create_state()
         state.bake_strategy = "LOCAL"
+        # Simulate a completed local bake for the current file: path matches, mtime matches the
+        # (missing) file's empty mtime, so _local_bake_is_current() is True.
+        state.local_bake_source_path = "C:/Workspace/test.blend"
+        state.local_bake_source_mtime = ""
+        state.local_bake_fluid_manifest_json = ""
         context = _create_context(state)
         response = _create_simulation_issue_validate_response()
         launch_response = SimpleNamespace(job_id="job-7", status="Pending", message="RenderStill launched successfully.")
@@ -1146,6 +1149,35 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertEqual({"FINISHED"}, result)
         self.assertIn("bake", captured)
         self.assertFalse(captured["bake"], "local bake → plain Render*, not BakeAndRender*")
+
+    def test_launch_operator_local_strategy_without_local_bake_falls_back_to_delegated(self) -> None:
+        # Safety net (audit H2): LOCAL chosen and the validator flags a sim, but NO local bake ran for
+        # this file (path/mtime not recorded). We must NOT render unbaked — fall back to a delegated farm
+        # bake (BakeAndRender*, bake=True) rather than taking the plain path.
+        state = _create_state()
+        state.bake_strategy = "LOCAL"  # but no local_bake_source_path → _local_bake_is_current() is False
+        context = _create_context(state)
+        response = _create_simulation_issue_validate_response()
+        launch_response = SimpleNamespace(job_id="job-8", status="Pending", message="BakeAndRenderStill launched successfully.")
+        captured = {}
+
+        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
+        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
+
+        def run_selected_launch(_context, *, bake=False):
+            captured["bake"] = bake
+            return launch_response
+
+        bridge_operators._run_selected_launch = run_selected_launch
+        bridge_operators._sticky_render_settings_after_submit = lambda _context: None
+
+        operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
+        result = _run_launch_operator(operator, context)
+
+        self.assertEqual({"FINISHED"}, result)
+        self.assertTrue(captured.get("bake"), "no local bake found → must fall back to the delegated bake, never render unbaked")
 
 
 if __name__ == "__main__":
