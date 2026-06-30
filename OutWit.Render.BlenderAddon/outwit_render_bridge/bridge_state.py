@@ -303,6 +303,11 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     scene_render_engine: StringProperty(name="Scene Render Engine", default="")
     scene_engine_family: StringProperty(name="Scene Engine Family", default="")
     scene_use_nodes: BoolProperty(name="Scene Use Nodes", default=False)
+    # Bakeable-simulation analysis (filled by the scene scan in bridge_operators). Transient, like the
+    # other scene_* props — drives the bake-strategy UI and the launch gate.
+    scene_has_simulation: BoolProperty(name="Scene Has Simulation", default=False)
+    scene_simulation_summary: StringProperty(name="Scene Simulation Summary", default="")
+    scene_unbaked_simulation_summary: StringProperty(name="Scene Unbaked Simulation Summary", default="")
     render_film_transparent: BoolProperty(name="Render Film Transparent", default=False)
     render_file_format: StringProperty(name="Render File Format", default="")
     render_color_mode: StringProperty(name="Render Color Mode", default="")
@@ -411,6 +416,22 @@ class OutWitBridgeRuntimeState(PropertyGroup):
         ],
         default="Sequence",
         update=_sync_render_mode_and_persist,
+    )
+    # How to bake the scene's simulations before a distributed render. Shown + applied only when the
+    # scene scan finds a bakeable simulation (scene_has_simulation); a sim must never reach a plain
+    # Render* script unbaked. Bucket-1 persisted preference (round-trips via the bridge store).
+    bake_strategy: EnumProperty(
+        name="Bake simulations",
+        description="How to bake the scene's simulations into a frame-addressable cache before the "
+                    "distributed render — a simulation cannot be rendered unbaked across nodes",
+        items=[
+            ("DELEGATED", "On render farm",
+             "Bake on the fastest available node, then render distributed — no wait in Blender"),
+            ("LOCAL", "On this computer",
+             "Bake here in Blender before uploading — you watch the bake; uses your machine"),
+        ],
+        default="DELEGATED",
+        update=_mark_render_settings_changed_and_invalidate,
     )
     # A Render click is in flight (upload/validate/preflight/submit — no job id yet). Drives the
     # local SUBMITTING phase so the panel reacts INSTANTLY; mirrors the operators' re-entry guard.

@@ -1325,6 +1325,90 @@ def _run_selected_launch(context):
     return response
 
 
+def _point_cache_baked(point_cache) -> bool:
+    """True when a (cloth/soft-body/particle/rigid-body) point cache is baked. None-safe."""
+    return bool(getattr(point_cache, "is_baked", False)) if point_cache is not None else False
+
+
+def _dynamic_paint_baked(modifier) -> bool:
+    """True when any Dynamic Paint canvas surface is baked (its cache lives per-surface, not on the
+    modifier)."""
+    canvas = getattr(modifier, "canvas_settings", None)
+    surfaces = getattr(canvas, "canvas_surfaces", []) if canvas is not None else []
+    return any(_point_cache_baked(getattr(surface, "point_cache", None)) for surface in surfaces)
+
+
+def _has_geometry_nodes_simulation(modifier) -> bool:
+    """True when a Geometry Nodes modifier exposes bake targets (a simulation/bake zone)."""
+    bakes = getattr(modifier, "bakes", None)
+    return bool(bakes) and len(bakes) > 0
+
+
+def _scan_scene_simulations(scene):
+    """Walk the active scene for bakeable simulations and classify them (see bridge_simulation).
+
+    Mirrors the controller's taxonomy: Mantaflow fluid domains, cloth / soft body / dynamic paint
+    modifiers, dynamic particle systems (static hair regenerates deterministically and is excluded),
+    rigid body, and Geometry-Nodes simulation zones. Geometry-Nodes bake state has no simple flag, so
+    GN is reported unbaked — that only refines the panel wording; the gate keys on presence and a farm
+    rebake is harmless. Fully defensive: a partially-defined modifier must never raise inside a UI
+    refresh.
+    """
+    from .bridge_simulation import (
+        SimulationDescriptor,
+        summarize_simulations,
+        SIM_FLUID,
+        SIM_CLOTH,
+        SIM_SOFT_BODY,
+        SIM_DYNAMIC_PAINT,
+        SIM_PARTICLES,
+        SIM_RIGID_BODY,
+        SIM_GEOMETRY_NODES,
+    )
+
+    descriptors = []
+    for obj in getattr(scene, "objects", []):
+        for modifier in getattr(obj, "modifiers", []):
+            try:
+                modifier_type = getattr(modifier, "type", "")
+                if modifier_type == "FLUID" and getattr(modifier, "fluid_type", "") == "DOMAIN":
+                    domain = getattr(modifier, "domain_settings", None)
+                    baked = bool(getattr(domain, "has_cache_baked_data",
+                                         getattr(domain, "is_cache_baked_data", False))) if domain else False
+                    descriptors.append(SimulationDescriptor(SIM_FLUID, baked))
+                elif modifier_type == "CLOTH":
+                    descriptors.append(SimulationDescriptor(SIM_CLOTH, _point_cache_baked(getattr(modifier, "point_cache", None))))
+                elif modifier_type == "SOFT_BODY":
+                    descriptors.append(SimulationDescriptor(SIM_SOFT_BODY, _point_cache_baked(getattr(modifier, "point_cache", None))))
+                elif modifier_type == "DYNAMIC_PAINT":
+                    descriptors.append(SimulationDescriptor(SIM_DYNAMIC_PAINT, _dynamic_paint_baked(modifier)))
+                elif modifier_type == "NODES" and _has_geometry_nodes_simulation(modifier):
+                    descriptors.append(SimulationDescriptor(SIM_GEOMETRY_NODES, False))
+            except Exception:
+                continue
+
+        for particle_system in getattr(obj, "particle_systems", []):
+            try:
+                settings = getattr(particle_system, "settings", None)
+                if settings is None:
+                    continue
+                # Static hair (no hair dynamics) regenerates deterministically per frame — not a sim.
+                # NB: use_hair_dynamics lives on the ParticleSystem, not ParticleSettings.
+                if getattr(settings, "type", "") == "HAIR" and not getattr(particle_system, "use_hair_dynamics", False):
+                    continue
+                descriptors.append(SimulationDescriptor(SIM_PARTICLES, _point_cache_baked(getattr(particle_system, "point_cache", None))))
+            except Exception:
+                continue
+
+    rigidbody_world = getattr(scene, "rigidbody_world", None)
+    if rigidbody_world is not None:
+        collection = getattr(rigidbody_world, "collection", None) or getattr(rigidbody_world, "group", None)
+        if collection is not None and len(getattr(collection, "objects", [])) > 0:
+            descriptors.append(SimulationDescriptor(SIM_RIGID_BODY, _point_cache_baked(getattr(rigidbody_world, "point_cache", None))))
+
+    return summarize_simulations(descriptors)
+
+
 def _refresh_bridge_state(context) -> None:
     state = _get_runtime_state(context)
     scene = context.scene
@@ -1353,6 +1437,10 @@ def _refresh_bridge_state(context) -> None:
         state.scene_engine_family = "Unsupported"
         state.last_error = str(ex)
     state.scene_use_nodes = bool(getattr(scene, "use_nodes", False))
+    simulation_summary = _scan_scene_simulations(scene)
+    state.scene_has_simulation = simulation_summary.has_simulation
+    state.scene_simulation_summary = simulation_summary.summary_text()
+    state.scene_unbaked_simulation_summary = simulation_summary.unbaked_summary_text()
     state.render_film_transparent = bool(getattr(render, "film_transparent", False))
     state.render_file_format = getattr(render.image_settings, "file_format", "") or ""
     state.render_color_mode = getattr(render.image_settings, "color_mode", "") or ""
