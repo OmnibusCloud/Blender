@@ -618,13 +618,25 @@ def _ensure_uploaded_blob_id(state) -> str:
     return state.uploaded_blob_id
 
 
+def _blend_file_mtime(blend_path: str) -> str:
+    """The source .blend's last-modified time as a stable string, for the upload-cache key. Empty when
+    the path is missing/unreadable (the path/signature checks still apply then)."""
+    try:
+        return repr(os.path.getmtime(blend_path))
+    except OSError:
+        return ""
+
+
 def _scene_requires_upload(state, blend_path: str, output_signature: str) -> bool:
     # The path alone is NOT enough: output settings that travel inside the .blend (format family,
-    # color mode/depth, transparency, video container/codec) make the cached blob stale when changed.
+    # color mode/depth, transparency, video container/codec) make the cached blob stale when changed —
+    # and so does ANY other edit saved into the .blend (a camera added, materials tweaked, the sim
+    # re-baked). The file's modification time covers all of those: re-saving always re-uploads.
     return (
         not state.uploaded_blob_id
         or state.uploaded_source_path != blend_path
         or state.uploaded_output_signature != output_signature
+        or getattr(state, "uploaded_source_mtime", "") != _blend_file_mtime(blend_path)
     )
 
 
@@ -649,6 +661,7 @@ def _upload_current_blend(context):
     state.uploaded_blob_id = response.blob_id
     state.uploaded_source_path = blend_path
     state.uploaded_output_signature = output_signature
+    state.uploaded_source_mtime = _blend_file_mtime(blend_path)
     state.uploaded_file_name = response.file_name
     state.uploaded_file_size = response.file_size
     state.uploaded_attachment_manifest_json = json.dumps(attachments, ensure_ascii=False)
@@ -687,6 +700,7 @@ def _apply_upload_result(state, blend_path: str, output_signature: str, result: 
     state.uploaded_blob_id = response.blob_id
     state.uploaded_source_path = blend_path
     state.uploaded_output_signature = output_signature
+    state.uploaded_source_mtime = _blend_file_mtime(blend_path)
     state.uploaded_file_name = response.file_name
     state.uploaded_file_size = response.file_size
     state.uploaded_attachment_manifest_json = json.dumps(result["attachments"], ensure_ascii=False)

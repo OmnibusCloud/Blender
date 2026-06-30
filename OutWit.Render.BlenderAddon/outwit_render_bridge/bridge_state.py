@@ -286,6 +286,9 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     uploaded_blob_id: StringProperty(name="Uploaded Blob Id", default="")
     uploaded_source_path: StringProperty(name="Uploaded Source Path", default="")
     uploaded_output_signature: StringProperty(name="Uploaded Output Signature", default="")
+    # Source .blend mtime at upload time — re-saving the scene (camera added, sim re-baked, …) busts
+    # the upload cache even when path + output settings are unchanged.
+    uploaded_source_mtime: StringProperty(name="Uploaded Source Mtime", default="")
     uploaded_file_name: StringProperty(name="Uploaded File Name", default="")
     uploaded_file_size: IntProperty(name="Uploaded File Size", default=0)
     uploaded_attachment_manifest_json: StringProperty(name="Uploaded Attachment Manifest Json", default="")

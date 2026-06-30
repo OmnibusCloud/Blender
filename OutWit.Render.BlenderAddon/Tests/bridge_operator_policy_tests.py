@@ -184,6 +184,10 @@ def _load_bridge_operators_module():
 
 bridge_operators = _load_bridge_operators_module()
 
+# Several tests monkeypatch bridge_operators._scene_requires_upload (without restoring it), so keep a
+# pristine reference for the test that exercises the real cache-invalidation logic.
+_REAL_SCENE_REQUIRES_UPLOAD = bridge_operators._scene_requires_upload
+
 
 def _create_state() -> SimpleNamespace:
     return SimpleNamespace(
@@ -379,6 +383,30 @@ def _create_ready_preflight_response() -> SimpleNamespace:
 
 
 class BridgeOperatorPolicyTests(unittest.TestCase):
+    def test_scene_requires_upload_reuploads_after_a_saved_edit(self) -> None:
+        # Regression: adding a camera (or any edit) + saving must re-upload even when the path and the
+        # output-settings signature are unchanged — tracked via the .blend's modification time.
+        import os
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".blend")
+        os.close(fd)
+        try:
+            signature = "PNG|RGBA|8|O||"
+            state = _create_state()
+            state.uploaded_source_path = path
+            state.uploaded_output_signature = signature
+            state.uploaded_source_mtime = bridge_operators._blend_file_mtime(path)
+
+            # Same file, same settings → cached (no re-upload).
+            self.assertFalse(_REAL_SCENE_REQUIRES_UPLOAD(state, path, signature))
+
+            # Re-save advances mtime → must re-upload despite identical path + signature.
+            os.utime(path, (123456789, 123456789))
+            self.assertTrue(_REAL_SCENE_REQUIRES_UPLOAD(state, path, signature))
+        finally:
+            os.remove(path)
+
     def test_upload_operator_reports_packed_upload_message(self) -> None:
         state = _create_state()
         context = _create_context(state)
