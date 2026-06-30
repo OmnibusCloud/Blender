@@ -505,6 +505,12 @@ def _draw_simulation_bake(layout, state) -> None:
     box.label(text="Bake before rendering:")
     box.prop(state, "bake_strategy", expand=True)
 
+    # LOCAL needs the artist to know Render bakes here first (and saves the file). The unbaked check keeps
+    # the note from showing once everything is already baked.
+    if (getattr(state, "bake_strategy", "DELEGATED") or "DELEGATED").upper() == "LOCAL" \
+            and getattr(state, "scene_unbaked_simulation_summary", ""):
+        box.label(text="Render will bake on this computer first (saves the .blend).", icon="INFO")
+
 
 def _draw_render_setup(layout, context, state, view) -> None:
     _draw_target(layout, state)

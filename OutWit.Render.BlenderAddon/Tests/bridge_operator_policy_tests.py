@@ -136,6 +136,29 @@ def _load_bridge_operators_module():
     sys.modules[f"{PACKAGE_NAME}.bridge_dependency_policy"] = dependency_policy_module
     dependency_policy_spec.loader.exec_module(dependency_policy_module)
 
+    # bridge_simulation uses dataclass(slots=True) (Blender's 3.11+ Python); shim the slots kwarg away on
+    # an older test interpreter. The launch flow reaches it via _scan_scene_simulations.
+    simulation_spec = importlib.util.spec_from_file_location(
+        f"{PACKAGE_NAME}.bridge_simulation", ADDON_DIR / "bridge_simulation.py")
+    simulation_module = importlib.util.module_from_spec(simulation_spec)
+    sys.modules[f"{PACKAGE_NAME}.bridge_simulation"] = simulation_module
+    if sys.version_info >= (3, 10):
+        simulation_spec.loader.exec_module(simulation_module)
+    else:
+        import dataclasses as _dataclasses
+
+        _real_dataclass = _dataclasses.dataclass
+
+        def _dataclass_without_slots(*args, **kwargs):
+            kwargs.pop("slots", None)
+            return _real_dataclass(*args, **kwargs)
+
+        _dataclasses.dataclass = _dataclass_without_slots
+        try:
+            simulation_spec.loader.exec_module(simulation_module)
+        finally:
+            _dataclasses.dataclass = _real_dataclass
+
     bridge_scene_packaging_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_scene_packaging")
 
     class ScenePackagingError(Exception):
@@ -997,7 +1020,8 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertIn("baked on the render farm", state.status_message)
         self.assertIn(({"INFO"}, state.status_message), operator.report_calls)
 
-    def test_validate_operator_blocks_simulation_when_local_bake_unavailable(self) -> None:
+    def test_validate_operator_reports_local_bake_for_simulation(self) -> None:
+        # LOCAL strategy + unbaked sim → not an error; it will be baked on this computer before rendering.
         state = _create_state()
         state.bake_strategy = "LOCAL"
         context = _create_context(state)
@@ -1012,8 +1036,8 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         result = operator.execute(context)
 
         self.assertEqual({"FINISHED"}, result)
-        self.assertIn("render farm", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
+        self.assertIn("this computer", state.status_message)
+        self.assertIn(({"INFO"}, state.status_message), operator.report_calls)
 
     def test_preflight_operator_skips_when_simulation_is_delegated_bake(self) -> None:
         # A simulation covered by a delegated bake is not preflighted on the unbaked scene; the
@@ -1036,7 +1060,9 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertFalse(state.preflight_still_ready)
         self.assertIn(({"INFO"}, state.status_message), operator.report_calls)
 
-    def test_preflight_operator_blocks_simulation_when_local_bake_unavailable(self) -> None:
+    def test_preflight_operator_skips_when_simulation_is_local_bake(self) -> None:
+        # A simulation covered by a local bake is not preflighted on the unbaked scene; the operator
+        # reports informationally ("on this computer") and leaves the per-mode verdicts unset.
         state = _create_state()
         state.bake_strategy = "LOCAL"
         context = _create_context(state)
@@ -1051,10 +1077,10 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
         result = operator.execute(context)
 
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertFalse(state.preflight_can_render_all)
-        self.assertIn("render farm", state.preflight_issue_summary)
-        self.assertIn(({"ERROR"}, state.preflight_issue_summary), operator.report_calls)
+        self.assertEqual({"FINISHED"}, result)
+        self.assertIn("this computer", state.status_message)
+        self.assertFalse(state.preflight_still_ready)
+        self.assertIn(({"INFO"}, state.status_message), operator.report_calls)
 
     def test_launch_operator_routes_unbaked_simulation_to_delegated_bake(self) -> None:
         # The crux: an unbaked simulation with DELEGATED must NOT block and must NOT reach a plain
@@ -1089,26 +1115,36 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertTrue(captured.get("bake"), "launch must route to the BakeAndRender* path")
         self.assertIn(({"INFO"}, "BakeAndRenderStill launched successfully."), operator.report_calls)
 
-    def test_launch_operator_blocks_simulation_when_local_bake_unavailable(self) -> None:
-        # LOCAL baking is not available yet, so the launch must refuse rather than silently delegate
-        # or render unbaked — the gate the user required ("no render without a bake plan").
+    def test_launch_operator_local_bake_renders_plain_not_delegated(self) -> None:
+        # LOCAL strategy: the scene is baked locally before upload, so the launch must take the PLAIN
+        # Render* path (bake=False) — never BakeAndRender* (which would re-bake on the farm). (The
+        # stub scene has no live sim objects, so the pre-upload bake step is skipped here; this exercises
+        # the post-upload routing for a LOCAL-baked scene the validator still flags.)
         state = _create_state()
         state.bake_strategy = "LOCAL"
         context = _create_context(state)
         response = _create_simulation_issue_validate_response()
+        launch_response = SimpleNamespace(job_id="job-7", status="Pending", message="RenderStill launched successfully.")
+        captured = {}
 
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
         bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
         bridge_operators._scene_requires_upload = lambda *_args: False
         bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
-        bridge_operators._run_selected_launch = lambda _context, *, bake=False: (_ for _ in ()).throw(AssertionError("must not submit when blocked"))
+
+        def run_selected_launch(_context, *, bake=False):
+            captured["bake"] = bake
+            return launch_response
+
+        bridge_operators._run_selected_launch = run_selected_launch
+        bridge_operators._sticky_render_settings_after_submit = lambda _context: None
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
         result = _run_launch_operator(operator, context)
 
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertIn("render farm", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
+        self.assertEqual({"FINISHED"}, result)
+        self.assertIn("bake", captured)
+        self.assertFalse(captured["bake"], "local bake → plain Render*, not BakeAndRender*")
 
 
 if __name__ == "__main__":

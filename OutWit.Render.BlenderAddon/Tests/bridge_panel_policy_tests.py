@@ -171,14 +171,16 @@ class BridgePanelPolicyTests(unittest.TestCase):
         self.assertNotEqual("Blocked", bridge_panel._primary_finding_policy(state))
         self.assertIn("baked on the render farm", bridge_panel._simulation_bake_plan_message(state))
 
-    def test_primary_finding_surfaces_simulation_block_when_local_bake_unavailable(self) -> None:
+    def test_primary_finding_omits_simulation_when_local_bake_covers_it(self) -> None:
+        # LOCAL strategy (now available): the simulation is baked on this computer → not a block.
         state = _create_state()
         state.bake_strategy = "LOCAL"
         state.validate_warning_summary = ""
         state.validate_issue_summary = "Cloth simulation 'Pillow' is not yet portable to remote rendering in the current v1 flow."
 
-        self.assertIn("render farm", bridge_panel._primary_finding(state))
-        self.assertEqual("Blocked", bridge_panel._primary_finding_policy(state))
+        self.assertEqual("", bridge_panel._primary_finding(state))
+        self.assertNotEqual("Blocked", bridge_panel._primary_finding_policy(state))
+        self.assertIn("this computer", bridge_panel._simulation_bake_plan_message(state))
 
     def test_dependency_plan_block_message_returns_primary_finding_only_when_blocked(self) -> None:
         state = _create_state()
@@ -197,13 +199,14 @@ class BridgePanelPolicyTests(unittest.TestCase):
 
         self.assertEqual("", result)
 
-    def test_dependency_plan_block_message_blocks_simulation_when_local_bake_unavailable(self) -> None:
+    def test_dependency_plan_block_message_empty_when_simulation_is_local_bake(self) -> None:
+        # LOCAL strategy (now available) covers the simulation → no diagnostic block.
         state = _create_state()
         state.bake_strategy = "LOCAL"
         state.validate_warning_summary = ""
         state.validate_issue_summary = "Cloth simulation 'Pillow' is not yet portable to remote rendering in the current v1 flow."
 
-        self.assertIn("render farm", bridge_panel._dependency_plan_block_message(state))
+        self.assertEqual("", bridge_panel._dependency_plan_block_message(state))
 
     def test_dependency_plan_block_message_empty_when_simulation_is_delegated_bake(self) -> None:
         state = _create_state()

@@ -131,7 +131,7 @@ LOCAL_BAKE_UNAVAILABLE_MESSAGE = (
 # unbaked simulation rather than silently delegating or — worse — rendering it unbaked. Flip to
 # ``True`` once the local driver ships. Lives here (not in bridge_simulation) so the bpy-free gate
 # in operators/status/panel can read it without importing the bpy-adjacent scan module.
-LOCAL_BAKE_AVAILABLE = False
+LOCAL_BAKE_AVAILABLE = True
 
 
 def resolve_bake_plan(

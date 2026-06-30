@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 import bpy
-from bpy.props import StringProperty
+from bpy.props import BoolProperty, StringProperty
 from bpy.types import Operator
 
 from .bridge_async import AsyncCall, JobMonitor, TERMINAL_STATUSES
@@ -285,18 +285,24 @@ def _get_uploaded_attachment_manifest(state) -> list[dict[str, object]]:
     return value if isinstance(value, list) else []
 
 
-def _local_bake_fluid_attachments(state) -> list[dict[str, object]]:
-    """Fluid-cache attachments collected by a local bake — but only when they still belong to the current
-    .blend (same path + mtime). After a save/edit they are discarded, so a stale manifest never attaches to
-    a different or modified scene."""
-    raw = getattr(state, "local_bake_fluid_manifest_json", "") or ""
-    if not raw:
-        return []
-
+def _local_bake_is_current(state) -> bool:
+    """True when a local bake's result still belongs to the CURRENT .blend (same path + mtime). The bake
+    saves the file and records its path/mtime; this stays true until the file is edited+saved again. Used
+    both to merge the fluid manifest and to avoid re-baking an already-locally-baked scene (Geometry-Nodes
+    sims always read as 'unbaked' from the scan, so presence alone cannot tell us a bake already ran)."""
     current_path = bpy.data.filepath or ""
-    if getattr(state, "local_bake_source_path", "") != current_path:
-        return []
-    if getattr(state, "local_bake_source_mtime", "") != _blend_file_mtime(current_path):
+    return (
+        bool(getattr(state, "local_bake_source_path", ""))
+        and getattr(state, "local_bake_source_path", "") == current_path
+        and getattr(state, "local_bake_source_mtime", "") == _blend_file_mtime(current_path)
+    )
+
+
+def _local_bake_fluid_attachments(state) -> list[dict[str, object]]:
+    """Fluid-cache attachments collected by a local bake — only when they still belong to the current
+    .blend (see _local_bake_is_current), so a stale manifest never attaches to a different/edited scene."""
+    raw = getattr(state, "local_bake_fluid_manifest_json", "") or ""
+    if not raw or not _local_bake_is_current(state):
         return []
 
     try:
@@ -312,6 +318,24 @@ def _planned_upload_attachments(state) -> list[dict[str, object]]:
     bake (already uploaded — merged so the farm manifest includes them; _upload_scene_attachments skips
     re-uploading entries that already carry a BlobId)."""
     return list(collect_scene_attachment_metadata()) + _local_bake_fluid_attachments(state)
+
+
+def _should_bake_locally_first(context) -> bool:
+    """True when a Render launch must run a LOCAL bake first: the LOCAL strategy is selected, the local
+    driver is available, the scene has an unbaked simulation, and we have not already locally baked THIS
+    exact .blend (the path+mtime guard that breaks the re-bake loop — Geometry-Nodes sims always read as
+    'unbaked' from the scan, so presence alone can't tell us a bake already ran)."""
+    from .bridge_dependency_policy import LOCAL_BAKE_AVAILABLE
+
+    state = _get_runtime_state(context)
+    if not LOCAL_BAKE_AVAILABLE:
+        return False
+    if (getattr(state, "bake_strategy", "DELEGATED") or "DELEGATED").upper() != "LOCAL":
+        return False
+    if _local_bake_is_current(state):
+        return False
+
+    return bool(_scan_scene_simulations(context.scene).unbaked_kinds)
 
 
 def _apply_dependency_plan(state, attachments: list[dict[str, object]]) -> None:
@@ -1690,6 +1714,10 @@ class OUTWIT_OT_bridge_bake_local(Operator):
     bl_description = ("Bake this scene's simulations in Blender and save the .blend, so the baked scene "
                       "renders distributed without a farm bake")
 
+    # Set by the Render launch when it delegates baking to this operator: on completion, continue to the
+    # render. False for a standalone bake (the artist just wanted to bake).
+    chain_to_render: BoolProperty(default=False, options={"SKIP_SAVE", "HIDDEN"})
+
     _timer = None
     _steps: list = []
     _index = 0
@@ -1782,6 +1810,12 @@ class OUTWIT_OT_bridge_bake_local(Operator):
                                 if fluid_attachments else "Local bake complete.")
         self.report({"INFO"}, state.status_message)
         _tag_job_areas_redraw()
+
+        # When the Render launch delegated this bake, continue to the render now that the scene is baked
+        # (it reads as baked → the launch takes the plain Render* path with the collected fluid caches).
+        if self.chain_to_render:
+            bpy.ops.outwit.bridge_launch_render("INVOKE_DEFAULT")
+
         return {"FINISHED"}
 
     def _cancel(self, context, message: str, level: str = "WARNING"):
@@ -2198,6 +2232,13 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             self.report({"WARNING"}, "A launch is already in progress.")
             return {"CANCELLED"}
 
+        # LOCAL strategy with an unbaked simulation: bake it in this Blender FIRST, then the bake operator
+        # re-invokes this launch (the scene now reads as baked → plain Render* with the collected fluid
+        # caches). The path+mtime guard in _should_bake_locally_first stops this from looping.
+        if _should_bake_locally_first(context):
+            bpy.ops.outwit.bridge_bake_local("INVOKE_DEFAULT", chain_to_render=True)
+            return {"FINISHED"}
+
         # Main-thread: validate the scene is saved and gather all bpy-derived data up front, so the
         # worker thread only does network/subprocess work (Blender's API is not thread-safe).
         try:
@@ -2327,13 +2368,13 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             if bake_plan.block:
                 raise BridgeClientError(bake_plan.block)
 
-            bake = bake_plan.should_delegate or bake_plan.should_local
+            covered_by_bake = bake_plan.should_delegate or bake_plan.should_local
 
             if not validation_response.is_valid:
-                # The ONLY validation failure a bake may bypass is the simulation-cache block, and only
-                # when a bake plan covers it. Any other hard issue still blocks.
+                # The ONLY validation failure a bake plan may bypass is the simulation-cache block, and
+                # only when a plan covers it. Any other hard issue still blocks.
                 other_issue = get_non_simulation_validation_issue(state.validate_issue_summary)
-                if other_issue or not bake:
+                if other_issue or not covered_by_bake:
                     raise BridgeClientError(
                         other_issue
                         or validation_response.message
@@ -2342,11 +2383,16 @@ class OUTWIT_OT_bridge_launch_render(Operator):
                         or "Blend validation reported blocking issues."
                     )
 
-            if bake:
-                # Bake path: the BakeAndRender* script bakes the simulation on the delegated node, then
-                # validates and renders the BAKED scene. The plain-scene preflight is skipped by design
-                # — it would re-flag the very simulation we are about to bake.
+            if bake_plan.should_delegate:
+                # Delegated bake: the BakeAndRender* script bakes the simulation on the fastest node, then
+                # validates and renders the BAKED scene. The plain-scene preflight is skipped by design —
+                # it would re-flag the very simulation we are about to bake.
                 response = _run_selected_launch(context, bake=True)
+            elif bake_plan.should_local:
+                # Local bake already ran in this Blender before upload — the uploaded scene IS baked, so it
+                # renders through the PLAIN Render* path with the collected fluid caches. Preflight is
+                # skipped: it can false-flag an already-baked Geometry-Nodes zone (no bake-state flag).
+                response = _run_selected_launch(context, bake=False)
             else:
                 _run_preflight(context)
                 if not _selected_mode_is_ready(state):

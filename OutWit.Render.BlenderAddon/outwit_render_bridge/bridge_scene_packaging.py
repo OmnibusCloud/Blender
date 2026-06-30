@@ -51,6 +51,31 @@ def create_packed_upload_copy(source_blend_path: str):
             stream.write(
                 "import bpy\n"
                 "bpy.ops.file.pack_all()\n"
+                "\n"
+                # Strip flow/effector (non-DOMAIN) fluid modifiers ONLY when the domain is already baked
+                # (the local-bake path): their effect is captured in the baked cache, and their live
+                # source->domain relations can crash a node rendering an isolated frame from the sliced
+                # cache (mirrors the controller's post-bake strip). An UNbaked scene (delegated path) still
+                # needs them for the farm bake, so it is left untouched. Runs on the upload COPY, so the
+                # artist's live scene keeps its modifiers either way.
+                "def _domain_is_baked(mod):\n"
+                "    ds = getattr(mod, 'domain_settings', None)\n"
+                "    if ds is None:\n"
+                "        return False\n"
+                "    return bool(getattr(ds, 'has_cache_baked_data', getattr(ds, 'is_cache_baked_data', False)))\n"
+                "\n"
+                "_has_baked_domain = any(\n"
+                "    getattr(m, 'type', '') == 'FLUID' and getattr(m, 'fluid_type', '') == 'DOMAIN' and _domain_is_baked(m)\n"
+                "    for o in bpy.data.objects for m in getattr(o, 'modifiers', []))\n"
+                "if _has_baked_domain:\n"
+                "    for o in list(bpy.data.objects):\n"
+                "        for m in list(getattr(o, 'modifiers', [])):\n"
+                "            if getattr(m, 'type', '') == 'FLUID' and getattr(m, 'fluid_type', '') != 'DOMAIN':\n"
+                "                try:\n"
+                "                    o.modifiers.remove(m)\n"
+                "                except Exception:\n"
+                "                    pass\n"
+                "\n"
                 "bpy.ops.wm.save_mainfile()\n"
             )
 
