@@ -79,5 +79,59 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
             CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderStill script: delegates a simulation bake to the fastest
+        /// node, then renders the single baked frame distributed.
+        /// </summary>
+        Task<RunRenderStillResponse> RunBakeAndRenderStillAsync(
+            Guid sceneBlobId,
+            int frame,
+            RenderOptionsData options,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderStillTiled script: delegates a simulation bake, then
+        /// renders the baked frame split into tiles across the crowd.
+        /// </summary>
+        Task<RunRenderStillTiledResponse> RunBakeAndRenderStillTiledAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderFrames script: delegates a simulation bake, then renders
+        /// the baked frame range distributed.
+        /// </summary>
+        Task<RunRenderFramesResponse> RunBakeAndRenderFramesAsync(
+            Guid sceneBlobId,
+            int startFrame,
+            int endFrame,
+            RenderOptionsData options,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderVideo script: delegates a simulation bake, renders the
+        /// baked frame range distributed, then encodes the result to a video.
+        /// </summary>
+        Task<RunRenderVideoResponse> RunBakeAndRenderVideoAsync(
+            Guid sceneBlobId,
+            int startFrame,
+            int endFrame,
+            RenderOptionsData options,
+            VideoOptionsData video,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default);
     }
 }

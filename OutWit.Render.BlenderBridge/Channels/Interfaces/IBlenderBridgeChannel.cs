@@ -163,6 +163,62 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         Task<RunRenderVideoResponse> RunRenderVideoAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
 
         /// <summary>
+        /// Launches the bundled BakeAndRenderStill script (delegated simulation bake, then render) with
+        /// addon-provided attachment metadata.
+        /// </summary>
+        Task<RunRenderStillResponse> RunBakeAndRenderStillAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderStill script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderStillResponse> RunBakeAndRenderStillAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderStillTiled script with addon-provided attachment metadata.
+        /// </summary>
+        Task<RunRenderStillTiledResponse> RunBakeAndRenderStillTiledAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            List<RenderSceneAttachmentRefData> attachedFiles);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderStillTiled script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderStillTiledResponse> RunBakeAndRenderStillTiledAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            Guid selectedClientGroupId);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderFrames script with addon-provided attachment metadata.
+        /// </summary>
+        Task<RunRenderFramesResponse> RunBakeAndRenderFramesAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderFrames script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderFramesResponse> RunBakeAndRenderFramesAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderVideo script with addon-provided attachment metadata.
+        /// </summary>
+        Task<RunRenderVideoResponse> RunBakeAndRenderVideoAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderVideo script targeted at a specific client group (crowdcomputing).
+        /// </summary>
+        Task<RunRenderVideoResponse> RunBakeAndRenderVideoAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
+
+        /// <summary>
         /// Returns the current summary of one bridge-launched cloud job.
         /// </summary>
         Task<GetJobResponse> GetJobAsync(Guid jobId);

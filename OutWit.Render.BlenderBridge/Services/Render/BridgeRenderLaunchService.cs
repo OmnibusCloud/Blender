@@ -49,6 +49,23 @@ namespace OutWit.Render.BlenderBridge.Services.Render
         private const string RENDER_VIDEO_EEVEE_SCRIPT = "RenderVideoEevee";
         private const string RENDER_VIDEO_GREASE_PENCIL_SCRIPT = "RenderVideoGreasePencil";
 
+        // Bake-and-render variants: the controller first delegates a simulation bake to the fastest
+        // node (Render.BakeSimulation via Grid.Delegate), then distributes the baked scene exactly
+        // like the plain Render* counterparts. There is no engine-agnostic variant — the bake is
+        // engine-independent but the per-frame render is not, so every variant is engine-specific.
+        private const string BAKE_AND_RENDER_STILL_CYCLES_SCRIPT = "BakeAndRenderStillCycles";
+        private const string BAKE_AND_RENDER_STILL_EEVEE_SCRIPT = "BakeAndRenderStillEevee";
+        private const string BAKE_AND_RENDER_STILL_GREASE_PENCIL_SCRIPT = "BakeAndRenderStillGreasePencil";
+        private const string BAKE_AND_RENDER_STILL_TILED_CYCLES_SCRIPT = "BakeAndRenderStillTiledCycles";
+        private const string BAKE_AND_RENDER_STILL_TILED_EEVEE_SCRIPT = "BakeAndRenderStillTiledEevee";
+        private const string BAKE_AND_RENDER_STILL_TILED_GREASE_PENCIL_SCRIPT = "BakeAndRenderStillTiledGreasePencil";
+        private const string BAKE_AND_RENDER_FRAMES_CYCLES_SCRIPT = "BakeAndRenderFramesCycles";
+        private const string BAKE_AND_RENDER_FRAMES_EEVEE_SCRIPT = "BakeAndRenderFramesEevee";
+        private const string BAKE_AND_RENDER_FRAMES_GREASE_PENCIL_SCRIPT = "BakeAndRenderFramesGreasePencil";
+        private const string BAKE_AND_RENDER_VIDEO_CYCLES_SCRIPT = "BakeAndRenderVideoCycles";
+        private const string BAKE_AND_RENDER_VIDEO_EEVEE_SCRIPT = "BakeAndRenderVideoEevee";
+        private const string BAKE_AND_RENDER_VIDEO_GREASE_PENCIL_SCRIPT = "BakeAndRenderVideoGreasePencil";
+
         private static readonly JsonSerializerOptions JSON_OPTIONS = new()
         {
             PropertyNameCaseInsensitive = true
@@ -349,6 +366,164 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             };
         }
 
+        public async Task<RunRenderStillResponse> RunBakeAndRenderStillAsync(
+            Guid sceneBlobId,
+            int frame,
+            RenderOptionsData options,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfSceneBlobIdMissing(sceneBlobId);
+
+            ArgumentNullException.ThrowIfNull(options);
+
+            var client = await GetRequiredClientAsync(cancellationToken);
+            var scene = CreateScene(sceneBlobId, attachedFiles);
+            var bakeOptions = CreateBakeOptions();
+            var scriptName = ResolveBakeAndRenderStillScript(options.Engine);
+
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options, bakeOptions }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, frame, options, bakeOptions);
+
+            Logger.LogInformation("Bridge BakeAndRenderStill launched for blob {BlobId} at frame {Frame} with job {JobId}",
+                sceneBlobId,
+                frame,
+                handle.JobId);
+
+            JobTrackerService.TrackJob(handle.JobId);
+
+            return new RunRenderStillResponse
+            {
+                JobId = handle.JobId,
+                Status = ProcessingJobStatus.Pending.ToString(),
+                Message = "BakeAndRenderStill launched successfully."
+            };
+        }
+
+        public async Task<RunRenderStillTiledResponse> RunBakeAndRenderStillTiledAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfSceneBlobIdMissing(sceneBlobId);
+
+            ArgumentNullException.ThrowIfNull(options);
+            ArgumentNullException.ThrowIfNull(tileOptions);
+
+            var client = await GetRequiredClientAsync(cancellationToken);
+            var scene = CreateScene(sceneBlobId, attachedFiles);
+            var bakeOptions = CreateBakeOptions();
+            var scriptName = ResolveBakeAndRenderStillTiledScript(options.Engine);
+
+            // Arg order matches the .wit signature: (scene, frame, tilesX, tilesY, options, bakeOptions, tileOptions).
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, bakeOptions, tileOptions }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, frame, tilesX, tilesY, options, bakeOptions, tileOptions);
+
+            Logger.LogInformation("Bridge BakeAndRenderStillTiled launched for blob {BlobId} at frame {Frame} with tiles {TilesX}x{TilesY} and job {JobId}",
+                sceneBlobId,
+                frame,
+                tilesX,
+                tilesY,
+                handle.JobId);
+
+            JobTrackerService.TrackJob(handle.JobId);
+
+            return new RunRenderStillTiledResponse
+            {
+                JobId = handle.JobId,
+                Status = ProcessingJobStatus.Pending.ToString(),
+                Message = "BakeAndRenderStillTiled launched successfully."
+            };
+        }
+
+        public async Task<RunRenderFramesResponse> RunBakeAndRenderFramesAsync(
+            Guid sceneBlobId,
+            int startFrame,
+            int endFrame,
+            RenderOptionsData options,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfSceneBlobIdMissing(sceneBlobId);
+
+            ArgumentNullException.ThrowIfNull(options);
+
+            var client = await GetRequiredClientAsync(cancellationToken);
+            var scene = CreateScene(sceneBlobId, attachedFiles);
+            var bakeOptions = CreateBakeOptions();
+            var scriptName = ResolveBakeAndRenderFramesScript(options.Engine);
+
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, bakeOptions }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options, bakeOptions);
+
+            Logger.LogInformation("Bridge BakeAndRenderFrames launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
+                sceneBlobId,
+                startFrame,
+                endFrame,
+                handle.JobId);
+
+            JobTrackerService.TrackJob(handle.JobId);
+
+            return new RunRenderFramesResponse
+            {
+                JobId = handle.JobId,
+                Status = ProcessingJobStatus.Pending.ToString(),
+                Message = "BakeAndRenderFrames launched successfully."
+            };
+        }
+
+        public async Task<RunRenderVideoResponse> RunBakeAndRenderVideoAsync(
+            Guid sceneBlobId,
+            int startFrame,
+            int endFrame,
+            RenderOptionsData options,
+            VideoOptionsData video,
+            IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfSceneBlobIdMissing(sceneBlobId);
+
+            ArgumentNullException.ThrowIfNull(options);
+            ArgumentNullException.ThrowIfNull(video);
+
+            var client = await GetRequiredClientAsync(cancellationToken);
+            var scene = CreateScene(sceneBlobId, attachedFiles);
+            var bakeOptions = CreateBakeOptions();
+            var scriptName = ResolveBakeAndRenderVideoScript(options.Engine);
+
+            // Arg order matches the .wit signature: (scene, startFrame, endFrame, options, bakeOptions, video).
+            var handle = selectedClientGroupId.HasValue
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, bakeOptions, video }, selectedClientGroupId)
+                : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options, bakeOptions, video);
+
+            Logger.LogInformation("Bridge BakeAndRenderVideo launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
+                sceneBlobId,
+                startFrame,
+                endFrame,
+                handle.JobId);
+
+            JobTrackerService.TrackJob(handle.JobId);
+
+            return new RunRenderVideoResponse
+            {
+                JobId = handle.JobId,
+                Status = ProcessingJobStatus.Pending.ToString(),
+                Message = "BakeAndRenderVideo launched successfully."
+            };
+        }
+
         #endregion
 
         #region Tools
@@ -447,6 +622,56 @@ namespace OutWit.Render.BlenderBridge.Services.Render
                 RenderEngine.GreasePencil => RENDER_VIDEO_GREASE_PENCIL_SCRIPT,
                 _ => RENDER_VIDEO_SCRIPT
             };
+        }
+
+        // Bake-and-render has no engine-agnostic fallback script, so an unexpected engine value maps
+        // to Cycles — the RenderOptionsData default and the safe choice for an unbaked simulation.
+        private static string ResolveBakeAndRenderStillScript(RenderEngine engine)
+        {
+            return engine switch
+            {
+                RenderEngine.Eevee => BAKE_AND_RENDER_STILL_EEVEE_SCRIPT,
+                RenderEngine.GreasePencil => BAKE_AND_RENDER_STILL_GREASE_PENCIL_SCRIPT,
+                _ => BAKE_AND_RENDER_STILL_CYCLES_SCRIPT
+            };
+        }
+
+        private static string ResolveBakeAndRenderStillTiledScript(RenderEngine engine)
+        {
+            return engine switch
+            {
+                RenderEngine.Eevee => BAKE_AND_RENDER_STILL_TILED_EEVEE_SCRIPT,
+                RenderEngine.GreasePencil => BAKE_AND_RENDER_STILL_TILED_GREASE_PENCIL_SCRIPT,
+                _ => BAKE_AND_RENDER_STILL_TILED_CYCLES_SCRIPT
+            };
+        }
+
+        private static string ResolveBakeAndRenderFramesScript(RenderEngine engine)
+        {
+            return engine switch
+            {
+                RenderEngine.Eevee => BAKE_AND_RENDER_FRAMES_EEVEE_SCRIPT,
+                RenderEngine.GreasePencil => BAKE_AND_RENDER_FRAMES_GREASE_PENCIL_SCRIPT,
+                _ => BAKE_AND_RENDER_FRAMES_CYCLES_SCRIPT
+            };
+        }
+
+        private static string ResolveBakeAndRenderVideoScript(RenderEngine engine)
+        {
+            return engine switch
+            {
+                RenderEngine.Eevee => BAKE_AND_RENDER_VIDEO_EEVEE_SCRIPT,
+                RenderEngine.GreasePencil => BAKE_AND_RENDER_VIDEO_GREASE_PENCIL_SCRIPT,
+                _ => BAKE_AND_RENDER_VIDEO_CYCLES_SCRIPT
+            };
+        }
+
+        // Delegated-bake options. The controller bakes every sequential simulation it finds and only
+        // reads ResolutionMax (0 = keep the scene's domain resolution); SimulationKinds/CacheFormat
+        // are forward-looking metadata. The artist has no knobs for these yet, so defaults are used.
+        private static RenderBakeOptionsData CreateBakeOptions()
+        {
+            return new RenderBakeOptionsData();
         }
 
         private static int CountIssues(RenderPreflightData result)
