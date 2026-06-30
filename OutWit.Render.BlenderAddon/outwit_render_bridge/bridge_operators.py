@@ -1163,6 +1163,7 @@ def _push_render_settings(context) -> None:
         video_crf=int(state.video_constant_rate_factor),
         group_id=group_id,
         group_name=group_name_for(groups, group_id),
+        bake_strategy=getattr(state, "bake_strategy", "DELEGATED"),
     ))
 
 

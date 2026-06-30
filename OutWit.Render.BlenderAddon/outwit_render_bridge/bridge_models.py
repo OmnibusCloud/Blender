@@ -225,6 +225,7 @@ class RenderSettingsResponse:
     video_crf: int = 23
     last_group_id: str = ""
     last_group_name: str = ""
+    bake_strategy: str = "DELEGATED"
 
     @staticmethod
     def from_json(data: dict[str, Any] | str) -> "RenderSettingsResponse":
@@ -241,6 +242,7 @@ class RenderSettingsResponse:
             video_crf=_get_int(data, "VideoCrf", 23),
             last_group_id=str(_get_value(data, "LastGroupId") or ""),
             last_group_name=str(_get_value(data, "LastGroupName") or ""),
+            bake_strategy=str(_get_value(data, "BakeStrategy") or "DELEGATED"),
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -257,6 +259,7 @@ class RenderSettingsResponse:
             "VideoCrf": int(self.video_crf),
             "LastGroupId": self.last_group_id or "",
             "LastGroupName": self.last_group_name or "",
+            "BakeStrategy": self.bake_strategy or "DELEGATED",
         }
 
 

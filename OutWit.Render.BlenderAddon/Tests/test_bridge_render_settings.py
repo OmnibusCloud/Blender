@@ -102,6 +102,7 @@ class RenderSettingsModelTests(unittest.TestCase):
         self.assertEqual(settings.tile_overlap, 8)
         self.assertEqual(settings.anim_result, "Sequence")
         self.assertEqual(settings.last_group_id, "")
+        self.assertEqual(settings.bake_strategy, "DELEGATED")
 
     def test_to_payload_round_trips_through_from_json(self):
         original = RenderSettingsResponse(
@@ -115,6 +116,7 @@ class RenderSettingsModelTests(unittest.TestCase):
             video_codec="H264",
             last_group_id="g-2",
             last_group_name="Render Farm B",
+            bake_strategy="LOCAL",
         )
 
         restored = RenderSettingsResponse.from_json(original.to_payload())
@@ -143,7 +145,14 @@ class SeedPropValuesTests(unittest.TestCase):
             "anim_result": "Video",
             "video_format": "WEBM_VP9",
             "video_constant_rate_factor": 30,
+            "bake_strategy": "DELEGATED",
         })
+
+    def test_seeds_bake_strategy_and_sanitizes_unknown(self):
+        self.assertEqual(_LOGIC.seed_prop_values(RenderSettingsResponse(bake_strategy="LOCAL"))["bake_strategy"], "LOCAL")
+        # Unknown/legacy-empty stored value falls back to the default rather than a bad enum write.
+        self.assertEqual(_LOGIC.seed_prop_values(RenderSettingsResponse(bake_strategy="bogus"))["bake_strategy"], "DELEGATED")
+        self.assertEqual(_LOGIC.seed_prop_values(RenderSettingsResponse())["bake_strategy"], "DELEGATED")
 
     def test_sanitizes_corrupt_values_against_prop_constraints(self):
         settings = RenderSettingsResponse(
@@ -205,6 +214,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             video_crf=28,
             group_id="g-1",
             group_name="Studio GPUs",
+            bake_strategy="LOCAL",
         )
 
         self.assertTrue(payload["RememberRenderSettings"])
@@ -217,6 +227,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
         self.assertEqual(payload["VideoCrf"], 28)
         self.assertEqual(payload["LastGroupId"], "g-1")
         self.assertEqual(payload["LastGroupName"], "Studio GPUs")
+        self.assertEqual(payload["BakeStrategy"], "LOCAL")
 
     def test_all_nodes_submit_stores_empty_group(self):
         payload = _LOGIC.compose_sticky_payload(
@@ -231,6 +242,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             video_crf=23,
             group_id="",
             group_name="",
+            bake_strategy="DELEGATED",
         )
 
         self.assertEqual(payload["LastGroupId"], "")

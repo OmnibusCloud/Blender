@@ -58,6 +58,14 @@ namespace OutWit.Render.BlenderBridge.Configuration
         [Setting("Render")]
         public virtual int VideoCrf { get; set; }
 
+        /// <summary>
+        /// How the scene's simulations are baked before a distributed render: "DELEGATED" (bake on the
+        /// fastest node via Grid.Delegate, the default) or "LOCAL" (bake in the artist's Blender before
+        /// upload). The artist's sticky choice; an unbaked simulation must never reach a plain Render*.
+        /// </summary>
+        [Setting("Render")]
+        public virtual string BakeStrategy { get; set; } = null!;
+
         #endregion
 
         #region Target

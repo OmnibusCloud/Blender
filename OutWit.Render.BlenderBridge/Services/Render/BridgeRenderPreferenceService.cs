@@ -32,7 +32,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
                 VideoCodec = RenderSettings.VideoCodec,
                 VideoCrf = RenderSettings.VideoCrf,
                 LastGroupId = RenderSettings.LastGroupId,
-                LastGroupName = RenderSettings.LastGroupName
+                LastGroupName = RenderSettings.LastGroupName,
+                BakeStrategy = string.IsNullOrEmpty(RenderSettings.BakeStrategy) ? "DELEGATED" : RenderSettings.BakeStrategy
             });
         }
 
@@ -52,6 +53,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderSettings.VideoCrf = renderSettings.VideoCrf;
             RenderSettings.LastGroupId = renderSettings.LastGroupId ?? "";
             RenderSettings.LastGroupName = renderSettings.LastGroupName ?? "";
+            RenderSettings.BakeStrategy = string.IsNullOrEmpty(renderSettings.BakeStrategy) ? "DELEGATED" : renderSettings.BakeStrategy;
 
             SettingsManager.Save();
 

@@ -18,6 +18,8 @@ from typing import Any
 from .bridge_models import RenderSettingsResponse
 
 _ANIM_RESULTS = {"Sequence", "Video"}
+_BAKE_STRATEGIES = {"DELEGATED", "LOCAL"}
+_DEFAULT_BAKE_STRATEGY = "DELEGATED"
 
 # Video preset identifier (the bpy EnumProperty) <-> the stored Container/Codec pair (bucket 1).
 _VIDEO_FORMAT_TO_STORE = {
@@ -52,6 +54,7 @@ def seed_prop_values(settings: RenderSettingsResponse) -> dict[str, Any]:
         return {}
 
     anim_result = settings.anim_result if settings.anim_result in _ANIM_RESULTS else "Sequence"
+    bake_strategy = settings.bake_strategy if settings.bake_strategy in _BAKE_STRATEGIES else _DEFAULT_BAKE_STRATEGY
     return {
         "split_frame": bool(settings.split_frame),
         "tiles_x": max(1, int(settings.tiles_x)),
@@ -60,6 +63,7 @@ def seed_prop_values(settings: RenderSettingsResponse) -> dict[str, Any]:
         "anim_result": anim_result,
         "video_format": video_format_from_store(settings.video_container, settings.video_codec),
         "video_constant_rate_factor": min(51, max(0, int(settings.video_crf))),
+        "bake_strategy": bake_strategy,
     }
 
 
@@ -115,6 +119,7 @@ def compose_sticky_payload(
     video_crf: int,
     group_id: str,
     group_name: str,
+    bake_strategy: str,
 ) -> dict[str, Any]:
     """Read-modify-write: overlay the addon-owned bucket-1 values on the bridge's CURRENT snapshot.
     ``remember`` comes from the live UI toggle — the authoritative intent even if a previous toggle
@@ -133,6 +138,7 @@ def compose_sticky_payload(
         "VideoCrf": int(video_crf),
         "LastGroupId": group_id or "",
         "LastGroupName": group_name or "",
+        "BakeStrategy": bake_strategy or _DEFAULT_BAKE_STRATEGY,
     })
     return payload
 

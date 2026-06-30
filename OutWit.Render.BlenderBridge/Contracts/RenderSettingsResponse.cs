@@ -29,7 +29,8 @@ namespace OutWit.Render.BlenderBridge.Contracts
                    && VideoCodec.Is(other.VideoCodec)
                    && VideoCrf.Is(other.VideoCrf)
                    && LastGroupId.Is(other.LastGroupId)
-                   && LastGroupName.Is(other.LastGroupName);
+                   && LastGroupName.Is(other.LastGroupName)
+                   && BakeStrategy.Is(other.BakeStrategy);
         }
 
         public override ModelBase Clone()
@@ -46,7 +47,8 @@ namespace OutWit.Render.BlenderBridge.Contracts
                 VideoCodec = VideoCodec,
                 VideoCrf = VideoCrf,
                 LastGroupId = LastGroupId,
-                LastGroupName = LastGroupName
+                LastGroupName = LastGroupName,
+                BakeStrategy = BakeStrategy
             };
         }
 
@@ -75,6 +77,10 @@ namespace OutWit.Render.BlenderBridge.Contracts
         public string LastGroupId { get; set; } = "";
 
         public string LastGroupName { get; set; } = "";
+
+        /// <summary>How to bake the scene's simulations before a distributed render: "DELEGATED" (default)
+        /// or "LOCAL". See <see cref="Configuration.BridgeRenderSettings.BakeStrategy"/>.</summary>
+        public string BakeStrategy { get; set; } = "DELEGATED";
 
         #endregion
     }
