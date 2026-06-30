@@ -18,7 +18,9 @@ from bpy.types import Panel
 from .branding import get_logo_icon_id, get_mark_icon_id, get_tray_icon_id
 from .bridge_dependency_policy import (
     get_dependency_portability_blocking_issue,
+    get_non_simulation_validation_issue,
     get_simulation_cache_blocking_issue,
+    resolve_bake_plan,
 )
 from .bridge_launcher import note_panel_visible
 from .bridge_engine_routing import scene_frame_count
@@ -162,16 +164,48 @@ def _engine_policy(state) -> str:
     return "Not checked"
 
 
+# These diagnostic helpers mirror bridge_status's bake-aware policy logic (the Advanced/Manual panels
+# keep their own copies — the diagnostic 10%). Keep them in step with bridge_status.
+def _bake_plan(state):
+    from .bridge_dependency_policy import LOCAL_BAKE_AVAILABLE
+
+    return resolve_bake_plan(
+        bool(_simulation_cache_policy_message(state)),
+        getattr(state, "bake_strategy", "DELEGATED"),
+        LOCAL_BAKE_AVAILABLE,
+    )
+
+
+def _simulation_bake_covers(state) -> bool:
+    plan = _bake_plan(state)
+    return (plan.should_delegate or plan.should_local) and not plan.block
+
+
+def _residual_validation_issue(state) -> str:
+    """The hard validation issue that still blocks after accounting for the bake plan (a covered
+    simulation-cache issue is dropped; a non-simulation issue or a plan that cannot bake remains)."""
+    merged = merge_unique_summaries(state.validate_issue_summary, _selected_mode_preflight_issue_summary(state))
+    if not merged:
+        return ""
+
+    plan = _bake_plan(state)
+    if plan.block:
+        return plan.block
+    if plan.should_delegate or plan.should_local:
+        return get_non_simulation_validation_issue(merged)
+    return first_summary_item(merged) or merged
+
+
 def _validation_policy(state) -> str:
     if not _has_validation_result(state):
         return "Not checked"
-    if state.validate_issue_summary:
+    if _residual_validation_issue(state):
         return "Blocked"
     if get_dependency_portability_blocking_issue(state.validate_warning_summary):
         return "Blocked"
     if state.validate_warning_summary:
         return "Ready with warnings"
-    return "Ready" if state.validate_is_valid else "Blocked"
+    return "Ready" if (state.validate_is_valid or _simulation_bake_covers(state)) else "Blocked"
 
 
 def _dependency_policy_message(state) -> str:
@@ -184,6 +218,16 @@ def _simulation_cache_policy_message(state) -> str:
     return get_simulation_cache_blocking_issue(
         merge_unique_summaries(state.validate_issue_summary, _selected_mode_preflight_issue_summary(state))
     )
+
+
+def _simulation_bake_plan_message(state) -> str:
+    """A non-blocking note for the diagnostic panel: what the chosen strategy will do with the
+    scene's (covered) simulation. Empty when there is no simulation or the plan does not cover it."""
+    if not _simulation_cache_policy_message(state) or not _simulation_bake_covers(state):
+        return ""
+    plan = _bake_plan(state)
+    where = "the render farm" if plan.should_delegate else "this computer"
+    return f"Simulation will be baked on {where} before rendering."
 
 
 def _selected_mode_policy(state) -> str:
@@ -215,10 +259,10 @@ def _unsupported_engine_message(state) -> str:
 
 
 def _primary_finding(state) -> str:
+    # _residual_validation_issue already folds in the bake-aware simulation handling (a covered sim
+    # is dropped; a plan that cannot bake, or a non-simulation issue, remains).
     return first_non_empty(
-        _simulation_cache_policy_message(state),
-        first_summary_item(state.validate_issue_summary),
-        first_summary_item(_selected_mode_preflight_issue_summary(state)),
+        _residual_validation_issue(state),
         _unsupported_engine_message(state),
         _dependency_policy_message(state),
         first_summary_item(state.validate_warning_summary),
@@ -227,7 +271,7 @@ def _primary_finding(state) -> str:
 
 
 def _primary_finding_policy(state) -> str:
-    if _simulation_cache_policy_message(state):
+    if _residual_validation_issue(state):
         return "Blocked"
     if state.validate_issue_summary or state.validate_warning_summary:
         return _validation_policy(state)
@@ -444,10 +488,31 @@ def _draw_target(layout, state) -> None:
         row.prop(state, "selected_client_group")
 
 
+def _draw_simulation_bake(layout, state) -> None:
+    """The bake-strategy chooser, shown only when the scene contains a simulation.
+
+    A sequential simulation (fluid/cloth/particles/…) cannot render distributed as-is — frame N
+    depends on frames 1…N-1, which a render node never sees — so it must be baked into a
+    frame-addressable cache first, and the artist chooses where. The actual block/plan note and the
+    Render-button gate come from compute_status (the single source), which honours this choice; this
+    box only offers the choice and names what was detected."""
+    if not getattr(state, "scene_has_simulation", False):
+        return
+
+    box = layout.box()
+    summary = getattr(state, "scene_simulation_summary", "") or ""
+    box.label(text=f"Simulation: {summary}" if summary else "Simulation detected", icon="PHYSICS")
+    box.label(text="Bake before rendering:")
+    box.prop(state, "bake_strategy", expand=True)
+
+
 def _draw_render_setup(layout, context, state, view) -> None:
     _draw_target(layout, state)
 
     _draw_output(layout, context, state, view)
+
+    # A scene with a simulation must be baked before a distributed render — let the artist choose how.
+    _draw_simulation_bake(layout, state)
 
     # One status line + one actionable blocker, from compute_status (replaces the Engine/Scene/Mode matrix).
     _draw_status(layout, context, view)

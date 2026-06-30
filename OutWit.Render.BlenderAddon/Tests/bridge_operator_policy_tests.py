@@ -765,119 +765,11 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertIn("unresolved external cache dependencies", state.status_message)
         self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
 
-    def test_validate_operator_surfaces_simulation_cache_policy_block_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_simulation_issue_validate_response()
 
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
-        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
-        result = operator.execute(context)
 
-        self.assertEqual({"FINISHED"}, result)
-        self.assertIn("fluid simulations that depend on external cache directories", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
 
-    def test_validate_operator_surfaces_missing_baked_simulation_policy_block_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_baked_simulation_issue_validate_response()
 
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
-
-        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
-        result = operator.execute(context)
-
-        self.assertEqual({"FINISHED"}, result)
-        self.assertIn("require baked data before remote rendering", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_validate_operator_surfaces_missing_baked_mesh_cache_policy_block_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_baked_mesh_cache_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
-
-        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
-        result = operator.execute(context)
-
-        self.assertEqual({"FINISHED"}, result)
-        self.assertIn("require baked mesh cache before remote rendering", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_validate_operator_surfaces_cloth_simulation_policy_block_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_cloth_simulation_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
-
-        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
-        result = operator.execute(context)
-
-        self.assertEqual({"FINISHED"}, result)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_validate_operator_surfaces_particle_simulation_policy_block_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_particle_simulation_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
-
-        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
-        result = operator.execute(context)
-
-        self.assertEqual({"FINISHED"}, result)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_validate_operator_surfaces_geometry_cache_policy_block_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_geometry_cache_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
-
-        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
-        result = operator.execute(context)
-
-        self.assertEqual({"FINISHED"}, result)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
 
     def test_preflight_operator_blocks_on_external_dependency_warning(self) -> None:
         state = _create_state()
@@ -965,135 +857,10 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertEqual("Still render ready.", state.status_message)
         self.assertIn(({"INFO"}, "Still render ready."), operator.report_calls)
 
-    def test_preflight_operator_blocks_on_simulation_cache_issue_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_simulation_issue_validate_response()
 
-        bridge_operators._get_bridge_client = lambda _context: object()
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
 
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
 
-        bridge_operators._run_validate_blend = run_validate_blend
 
-        operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
-        result = operator.execute(context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertFalse(state.preflight_can_render_all)
-        self.assertIn("fluid simulations that depend on external cache directories", state.preflight_issue_summary)
-        self.assertIn(({"ERROR"}, state.preflight_issue_summary), operator.report_calls)
-
-    def test_preflight_operator_blocks_on_missing_baked_mesh_cache_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_baked_mesh_cache_issue_validate_response()
-
-        bridge_operators._get_bridge_client = lambda _context: object()
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
-        result = operator.execute(context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertFalse(state.preflight_can_render_all)
-        self.assertIn("require baked mesh cache before remote rendering", state.preflight_issue_summary)
-        self.assertIn(({"ERROR"}, state.preflight_issue_summary), operator.report_calls)
-
-    def test_preflight_operator_blocks_on_particle_simulation_issue_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_particle_simulation_issue_validate_response()
-
-        bridge_operators._get_bridge_client = lambda _context: object()
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
-        result = operator.execute(context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertFalse(state.preflight_can_render_all)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.preflight_issue_summary)
-        self.assertIn(({"ERROR"}, state.preflight_issue_summary), operator.report_calls)
-
-    def test_preflight_operator_blocks_on_cloth_simulation_issue_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_cloth_simulation_issue_validate_response()
-
-        bridge_operators._get_bridge_client = lambda _context: object()
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
-        result = operator.execute(context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertFalse(state.preflight_can_render_all)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.preflight_issue_summary)
-        self.assertIn(({"ERROR"}, state.preflight_issue_summary), operator.report_calls)
-
-    def test_preflight_operator_blocks_on_geometry_cache_issue_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_geometry_cache_issue_validate_response()
-
-        bridge_operators._get_bridge_client = lambda _context: object()
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
-        result = operator.execute(context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertFalse(state.preflight_can_render_all)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.preflight_issue_summary)
-        self.assertIn(({"ERROR"}, state.preflight_issue_summary), operator.report_calls)
 
     def test_launch_operator_blocks_on_external_dependency_warning(self) -> None:
         state = _create_state()
@@ -1175,148 +942,144 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         self.assertEqual("Still render launched.", state.status_message)
         self.assertIn(({"INFO"}, "RenderStill launched successfully."), operator.report_calls)
 
-    def test_launch_operator_blocks_on_simulation_cache_issue_with_policy_message(self) -> None:
+
+
+
+
+
+
+    # --- Simulation bake plan (delegated bakes; local blocks until its driver ships) -----------------
+    # Per-kind recognition (fluid/cloth/particle/…) is covered in bridge_dependency_policy_tests;
+    # these verify the OPERATOR flow routes by bake plan, not by kind.
+
+    def test_validate_operator_reports_delegated_bake_for_simulation(self) -> None:
         state = _create_state()
         context = _create_context(state)
         response = _create_simulation_issue_validate_response()
 
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
         bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
         bridge_operators._scene_requires_upload = lambda *_args: False
+        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
+        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
+        result = operator.execute(context)
 
-        bridge_operators._run_validate_blend = run_validate_blend
+        self.assertEqual({"FINISHED"}, result)
+        self.assertIn("baked on the render farm", state.status_message)
+        self.assertIn(({"INFO"}, state.status_message), operator.report_calls)
 
-        operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = _run_launch_operator(operator, context)
+    def test_validate_operator_blocks_simulation_when_local_bake_unavailable(self) -> None:
+        state = _create_state()
+        state.bake_strategy = "LOCAL"
+        context = _create_context(state)
+        response = _create_simulation_issue_validate_response()
 
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertIn("fluid simulations that depend on external cache directories", state.status_message)
+        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
+        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
+
+        operator = bridge_operators.OUTWIT_OT_bridge_validate_blend()
+        result = operator.execute(context)
+
+        self.assertEqual({"FINISHED"}, result)
+        self.assertIn("render farm", state.status_message)
         self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
 
-    def test_launch_operator_blocks_on_missing_baked_simulation_data_with_policy_message(self) -> None:
+    def test_preflight_operator_skips_when_simulation_is_delegated_bake(self) -> None:
+        # A simulation covered by a delegated bake is not preflighted on the unbaked scene; the
+        # operator reports informationally and leaves the per-mode verdicts unset (Not checked).
         state = _create_state()
         context = _create_context(state)
-        response = _create_baked_simulation_issue_validate_response()
+        response = _create_simulation_issue_validate_response()
 
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
+        bridge_operators._get_bridge_client = lambda _context: object()
         bridge_operators._ensure_current_scene_uploaded = lambda _context: None
         bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
         bridge_operators._scene_requires_upload = lambda *_args: False
+        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
 
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
+        operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
+        result = operator.execute(context)
 
-        bridge_operators._run_validate_blend = run_validate_blend
+        self.assertEqual({"FINISHED"}, result)
+        self.assertIn("baked on the render farm", state.status_message)
+        self.assertFalse(state.preflight_still_ready)
+        self.assertIn(({"INFO"}, state.status_message), operator.report_calls)
+
+    def test_preflight_operator_blocks_simulation_when_local_bake_unavailable(self) -> None:
+        state = _create_state()
+        state.bake_strategy = "LOCAL"
+        context = _create_context(state)
+        response = _create_simulation_issue_validate_response()
+
+        bridge_operators._get_bridge_client = lambda _context: object()
+        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
+        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
+
+        operator = bridge_operators.OUTWIT_OT_bridge_run_preflight()
+        result = operator.execute(context)
+
+        self.assertEqual({"CANCELLED"}, result)
+        self.assertFalse(state.preflight_can_render_all)
+        self.assertIn("render farm", state.preflight_issue_summary)
+        self.assertIn(({"ERROR"}, state.preflight_issue_summary), operator.report_calls)
+
+    def test_launch_operator_routes_unbaked_simulation_to_delegated_bake(self) -> None:
+        # The crux: an unbaked simulation with DELEGATED must NOT block and must NOT reach a plain
+        # Render* script — it routes to the BakeAndRender* path (bake=True), skipping the plain-scene
+        # preflight (which would re-flag the very simulation being baked).
+        state = _create_state()
+        context = _create_context(state)
+        response = _create_simulation_issue_validate_response()
+        launch_response = SimpleNamespace(job_id="job-9", status="Pending", message="BakeAndRenderStill launched successfully.")
+        captured = {}
+
+        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
+        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
+
+        def run_preflight(_context):
+            raise AssertionError("preflight must be skipped on the delegated-bake path")
+
+        def run_selected_launch(_context, *, bake=False):
+            captured["bake"] = bake
+            return launch_response
+
+        bridge_operators._run_preflight = run_preflight
+        bridge_operators._run_selected_launch = run_selected_launch
+        bridge_operators._sticky_render_settings_after_submit = lambda _context: None
+
+        operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
+        result = _run_launch_operator(operator, context)
+
+        self.assertEqual({"FINISHED"}, result)
+        self.assertTrue(captured.get("bake"), "launch must route to the BakeAndRender* path")
+        self.assertIn(({"INFO"}, "BakeAndRenderStill launched successfully."), operator.report_calls)
+
+    def test_launch_operator_blocks_simulation_when_local_bake_unavailable(self) -> None:
+        # LOCAL baking is not available yet, so the launch must refuse rather than silently delegate
+        # or render unbaked — the gate the user required ("no render without a bake plan").
+        state = _create_state()
+        state.bake_strategy = "LOCAL"
+        context = _create_context(state)
+        response = _create_simulation_issue_validate_response()
+
+        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
+        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
+        bridge_operators._scene_requires_upload = lambda *_args: False
+        bridge_operators._run_validate_blend = lambda _context: (bridge_operators._apply_validate_response(state, response) or response)
+        bridge_operators._run_selected_launch = lambda _context, *, bake=False: (_ for _ in ()).throw(AssertionError("must not submit when blocked"))
 
         operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
         result = _run_launch_operator(operator, context)
 
         self.assertEqual({"CANCELLED"}, result)
-        self.assertIn("require baked data before remote rendering", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_launch_operator_blocks_on_missing_baked_mesh_cache_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_baked_mesh_cache_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = _run_launch_operator(operator, context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertIn("require baked mesh cache before remote rendering", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_launch_operator_blocks_on_particle_simulation_issue_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_particle_simulation_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = _run_launch_operator(operator, context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_launch_operator_blocks_on_cloth_simulation_issue_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_cloth_simulation_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = _run_launch_operator(operator, context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
-        self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
-
-    def test_launch_operator_blocks_on_geometry_cache_issue_with_policy_message(self) -> None:
-        state = _create_state()
-        context = _create_context(state)
-        response = _create_geometry_cache_issue_validate_response()
-
-        # Modern launch flow (0.2.0+): execute() validates the blend path and the upload-cache key
-        # itself, then runs the fast tail synchronously when no upload is needed.
-        bridge_operators._ensure_current_scene_uploaded = lambda _context: None
-        bridge_operators._get_current_blend_path = lambda: "C:/Workspace/test.blend"
-        bridge_operators._scene_requires_upload = lambda *_args: False
-
-        def run_validate_blend(_context):
-            bridge_operators._apply_validate_response(state, response)
-            return response
-
-        bridge_operators._run_validate_blend = run_validate_blend
-
-        operator = bridge_operators.OUTWIT_OT_bridge_launch_render()
-        result = _run_launch_operator(operator, context)
-
-        self.assertEqual({"CANCELLED"}, result)
-        self.assertIn("unsupported or non-portable simulation/cache state", state.status_message)
+        self.assertIn("render farm", state.status_message)
         self.assertIn(({"ERROR"}, state.status_message), operator.report_calls)
 
 

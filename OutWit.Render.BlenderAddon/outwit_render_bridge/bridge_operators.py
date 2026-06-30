@@ -12,7 +12,12 @@ from bpy.types import Operator
 from .bridge_async import AsyncCall, JobMonitor, TERMINAL_STATUSES
 from .bridge_client import BridgeClient, BridgeClientError
 from .bridge_context import load_latest_context, try_load_latest_context
-from .bridge_dependency_policy import get_dependency_portability_blocking_issue, get_simulation_cache_blocking_issue
+from .bridge_dependency_policy import (
+    get_dependency_portability_blocking_issue,
+    get_non_simulation_validation_issue,
+    get_simulation_cache_blocking_issue,
+    resolve_bake_plan,
+)
 from .bridge_engine_routing import (
     detect_scene_engine_family,
     get_scene_engine_token,
@@ -409,6 +414,25 @@ def _apply_preflight_response(state, response) -> None:
     state.preflight_warning_summary = _merge_unique_summaries(_collect_warning_summary(response), state.validate_warning_summary)
 
 
+def _launch_bake_plan(state):
+    """The bake plan for the current scene, keyed on the cloud validator's verdict.
+
+    The authoritative "is there an unbaked simulation?" signal at launch is the validator's
+    simulation-cache block — it is what the farm would refuse — not the local scene scan (which
+    drives the panel's instant preview and should agree). Returns a ``BakePlan`` (see
+    ``bridge_dependency_policy.resolve_bake_plan``): how the artist's ``bake_strategy`` resolves
+    (or fails to resolve) that block.
+    """
+    from .bridge_dependency_policy import LOCAL_BAKE_AVAILABLE
+
+    simulation_issue = get_simulation_cache_blocking_issue(state.validate_issue_summary)
+    return resolve_bake_plan(
+        bool(simulation_issue),
+        getattr(state, "bake_strategy", "DELEGATED"),
+        LOCAL_BAKE_AVAILABLE,
+    )
+
+
 def _validation_policy_message(state) -> str:
     portability_issue = get_dependency_portability_blocking_issue(state.validate_warning_summary)
     if portability_issue:
@@ -416,6 +440,20 @@ def _validation_policy_message(state) -> str:
 
     simulation_issue = get_simulation_cache_blocking_issue(state.validate_issue_summary)
     if simulation_issue:
+        plan = _launch_bake_plan(state)
+        if plan.block:
+            return plan.block
+
+        if plan.should_delegate or plan.should_local:
+            # A bake plan covers the simulation block — surface any OTHER hard validation issue a
+            # bake will NOT fix, otherwise report what the bake will do.
+            other_issue = get_non_simulation_validation_issue(state.validate_issue_summary)
+            if other_issue:
+                return _compose_policy_message("Scene blocked by validation.", other_issue)
+
+            where = "render farm" if plan.should_delegate else "this computer"
+            return f"Simulation will be baked on the {where} before rendering."
+
         return simulation_issue
 
     if state.validate_issue_summary:
@@ -425,6 +463,21 @@ def _validation_policy_message(state) -> str:
         return _compose_policy_message("Scene validated with warnings.", state.validate_warning_summary)
 
     return "Scene validated."
+
+
+def _validation_is_blocked(state) -> bool:
+    """True when validation has a hard block the artist must resolve (after accounting for the bake
+    plan). A simulation covered by the chosen bake strategy is NOT a block; a strategy that cannot
+    bake (LOCAL before its driver ships), a dependency-portability issue, or any non-simulation
+    validation issue IS."""
+    if get_dependency_portability_blocking_issue(state.validate_warning_summary):
+        return True
+
+    plan = _launch_bake_plan(state)
+    if plan.block or get_non_simulation_validation_issue(state.validate_issue_summary):
+        return True
+
+    return bool(state.validate_issue_summary) and not (plan.should_delegate or plan.should_local)
 
 
 def _preflight_policy_message(state) -> str:
@@ -1268,7 +1321,10 @@ def unregister_timers() -> None:
         bpy.app.handlers.load_post.remove(_on_blend_load)
 
 
-def _run_selected_launch(context):
+def _run_selected_launch(context, *, bake: bool = False):
+    """Submit the selected render mode. When ``bake`` is set, route to the controller's
+    BakeAndRender* scripts (delegated simulation bake, then distributed render of the baked scene)
+    instead of the plain Render* scripts — the only safe path for an unbaked simulation."""
     state = _get_runtime_state(context)
     scene = context.scene
     client = _get_bridge_client(context)
@@ -1281,48 +1337,53 @@ def _run_selected_launch(context):
     render_options = _collect_render_options(context)
     still_frame = _get_still_frame(context)
     group_id = _get_selected_client_group_id(state)
+    attachments = _get_uploaded_attachment_manifest(state)
 
     if state.render_mode == "Still":
-        response = client.run_render_still(blob_id, still_frame, render_options, _get_uploaded_attachment_manifest(state), group_id)
-        _apply_job_response(state, response, "RenderStill")
+        run = client.run_bake_and_render_still if bake else client.run_render_still
+        response = run(blob_id, still_frame, render_options, attachments, group_id)
+        _apply_job_response(state, response, "BakeAndRenderStill" if bake else "RenderStill")
         return response
 
     if state.render_mode == "StillTiled":
-        response = client.run_render_still_tiled(
+        run = client.run_bake_and_render_still_tiled if bake else client.run_render_still_tiled
+        response = run(
             blob_id,
             still_frame,
             int(state.tiles_x),
             int(state.tiles_y),
             render_options,
             _collect_tile_options(state),
-            _get_uploaded_attachment_manifest(state),
+            attachments,
             group_id,
         )
-        _apply_job_response(state, response, "RenderStillTiled")
+        _apply_job_response(state, response, "BakeAndRenderStillTiled" if bake else "RenderStillTiled")
         return response
 
     if state.render_mode == "Frames":
-        response = client.run_render_frames(
+        run = client.run_bake_and_render_frames if bake else client.run_render_frames
+        response = run(
             blob_id,
             int(scene.frame_start),
             int(scene.frame_end),
             render_options,
-            _get_uploaded_attachment_manifest(state),
+            attachments,
             group_id,
         )
-        _apply_job_response(state, response, "RenderFrames")
+        _apply_job_response(state, response, "BakeAndRenderFrames" if bake else "RenderFrames")
         return response
 
-    response = client.run_render_video(
+    run = client.run_bake_and_render_video if bake else client.run_render_video
+    response = run(
         blob_id,
         int(scene.frame_start),
         int(scene.frame_end),
         render_options,
         _collect_video_options(state),
-        _get_uploaded_attachment_manifest(state),
+        attachments,
         group_id,
     )
-    _apply_job_response(state, response, "RenderVideo")
+    _apply_job_response(state, response, "BakeAndRenderVideo" if bake else "RenderVideo")
     return response
 
 
@@ -1639,7 +1700,7 @@ class OUTWIT_OT_bridge_validate_blend(Operator):
             policy_message = _validation_policy_message(state)
             state.status_message = portability_issue or policy_message or response.message or response.status or "Blend validation completed."
             self.report(
-                {"ERROR" if portability_issue or state.validate_issue_summary else "INFO"},
+                {"ERROR" if _validation_is_blocked(state) else "INFO"},
                 state.status_message,
             )
             return {"FINISHED"}
@@ -1665,9 +1726,26 @@ class OUTWIT_OT_bridge_run_preflight(Operator):
             validation_response = _run_validate_blend(context)
             portability_issue = get_dependency_portability_blocking_issue(state.validate_warning_summary)
             simulation_issue = get_simulation_cache_blocking_issue(state.validate_issue_summary)
+            bake_plan = _launch_bake_plan(state)
+            bake = bake_plan.should_delegate or bake_plan.should_local
+            other_issue = get_non_simulation_validation_issue(state.validate_issue_summary)
+
+            # A simulation covered by a bake plan is NOT preflighted on the unbaked scene — it is baked
+            # first and the BAKED scene is validated at render time. Report informationally and leave the
+            # per-mode verdicts unset (Not checked), as long as nothing else blocks.
+            if not validation_response.is_valid and bake and not other_issue and not portability_issue:
+                _reset_preflight_state(state)
+                where = "the render farm" if bake_plan.should_delegate else "this computer"
+                message = f"Simulation will be baked on {where}; preflight runs on the baked scene at render time."
+                state.preflight_message = message
+                state.status_message = message
+                self.report({"INFO"}, message)
+                return {"FINISHED"}
+
             if not validation_response.is_valid:
                 state.preflight_status = validation_response.status
-                blocking_issue = simulation_issue or validation_response.message or _validation_policy_message(state)
+                blocking_issue = bake_plan.block or other_issue or simulation_issue \
+                    or validation_response.message or _validation_policy_message(state)
                 state.preflight_message = blocking_issue
                 state.preflight_can_render_all = False
                 state.preflight_still_ready = False
@@ -1905,24 +1983,45 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         state = _get_runtime_state(context)
         try:
             validation_response = _run_validate_blend(context)
-            if not validation_response.is_valid:
-                raise BridgeClientError(
-                    get_simulation_cache_blocking_issue(state.validate_issue_summary)
-                    or validation_response.message
-                    or _validation_policy_message(state)
-                    or state.validate_issue_summary
-                    or "Blend validation reported blocking issues."
-                )
 
+            # A missing external dependency is never fixed by a bake — block first, unconditionally.
             portability_issue = get_dependency_portability_blocking_issue(state.validate_warning_summary)
             if portability_issue:
                 raise BridgeClientError(portability_issue)
 
-            _run_preflight(context)
-            if not _selected_mode_is_ready(state):
-                raise BridgeClientError(_selected_mode_policy_message(state))
+            # Decide how an unbaked simulation is handled. The validator flags one as a hard block; the
+            # artist's bake strategy may resolve it (delegated bake) — but never silently: a strategy
+            # that cannot bake (LOCAL before its driver ships) keeps the block.
+            bake_plan = _launch_bake_plan(state)
+            if bake_plan.block:
+                raise BridgeClientError(bake_plan.block)
 
-            response = _run_selected_launch(context)
+            bake = bake_plan.should_delegate or bake_plan.should_local
+
+            if not validation_response.is_valid:
+                # The ONLY validation failure a bake may bypass is the simulation-cache block, and only
+                # when a bake plan covers it. Any other hard issue still blocks.
+                other_issue = get_non_simulation_validation_issue(state.validate_issue_summary)
+                if other_issue or not bake:
+                    raise BridgeClientError(
+                        other_issue
+                        or validation_response.message
+                        or _validation_policy_message(state)
+                        or state.validate_issue_summary
+                        or "Blend validation reported blocking issues."
+                    )
+
+            if bake:
+                # Bake path: the BakeAndRender* script bakes the simulation on the delegated node, then
+                # validates and renders the BAKED scene. The plain-scene preflight is skipped by design
+                # — it would re-flag the very simulation we are about to bake.
+                response = _run_selected_launch(context, bake=True)
+            else:
+                _run_preflight(context)
+                if not _selected_mode_is_ready(state):
+                    raise BridgeClientError(_selected_mode_policy_message(state))
+                response = _run_selected_launch(context)
+
             _sticky_render_settings_after_submit(context)
             state.status_message = _selected_mode_launched_message(state)
             self.report({"INFO"}, response.message or response.status or "Render launched.")

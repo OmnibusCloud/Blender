@@ -160,65 +160,25 @@ class BridgePanelPolicyTests(unittest.TestCase):
 
         self.assertEqual("Blocked", result)
 
-    def test_primary_finding_uses_simulation_cache_policy_message_before_raw_issue(self) -> None:
-        state = _create_state()
-        state.validate_warning_summary = ""
-        state.validate_issue_summary = "Fluid domain 'Domain' uses external cache directory '/tmp/cache', which is not portable to remote nodes in the current v1 flow."
-
-        result = bridge_panel._primary_finding(state)
-
-        self.assertIn("fluid simulations that depend on external cache directories", result)
-        self.assertIn("Fluid domain 'Domain' uses external cache directory", result)
-
-    def test_primary_finding_uses_baked_mesh_cache_policy_message_before_raw_issue(self) -> None:
-        state = _create_state()
-        state.validate_warning_summary = ""
-        state.validate_issue_summary = "Fluid domain 'Domain' requires baked mesh cache before remote rendering."
-
-        result = bridge_panel._primary_finding(state)
-
-        self.assertIn("require baked mesh cache before remote rendering", result)
-        self.assertIn("Fluid domain 'Domain' requires baked mesh cache", result)
-
-    def test_primary_finding_uses_baked_simulation_data_policy_message_before_raw_issue(self) -> None:
+    # Bake-aware simulation handling. Per-kind recognition is covered in
+    # bridge_dependency_policy_tests; these verify the diagnostic finding routes by bake plan.
+    def test_primary_finding_omits_simulation_when_delegated_bake_covers_it(self) -> None:
         state = _create_state()
         state.validate_warning_summary = ""
         state.validate_issue_summary = "Fluid domain 'Domain' requires baked simulation data before remote rendering."
 
-        result = bridge_panel._primary_finding(state)
+        self.assertEqual("", bridge_panel._primary_finding(state))
+        self.assertNotEqual("Blocked", bridge_panel._primary_finding_policy(state))
+        self.assertIn("baked on the render farm", bridge_panel._simulation_bake_plan_message(state))
 
-        self.assertIn("require baked data before remote rendering", result)
-        self.assertIn("Fluid domain 'Domain' requires baked simulation data", result)
-
-    def test_primary_finding_uses_cloth_simulation_policy_message_before_raw_issue(self) -> None:
+    def test_primary_finding_surfaces_simulation_block_when_local_bake_unavailable(self) -> None:
         state = _create_state()
+        state.bake_strategy = "LOCAL"
         state.validate_warning_summary = ""
         state.validate_issue_summary = "Cloth simulation 'Pillow' is not yet portable to remote rendering in the current v1 flow."
 
-        result = bridge_panel._primary_finding(state)
-
-        self.assertIn("unsupported or non-portable simulation/cache state", result)
-        self.assertIn("Cloth simulation 'Pillow'", result)
-
-    def test_primary_finding_uses_particle_simulation_policy_message_before_raw_issue(self) -> None:
-        state = _create_state()
-        state.validate_warning_summary = ""
-        state.validate_issue_summary = "Particle simulation 'Emitter' is not yet portable to remote rendering in the current v1 flow."
-
-        result = bridge_panel._primary_finding(state)
-
-        self.assertIn("unsupported or non-portable simulation/cache state", result)
-        self.assertIn("Particle simulation 'Emitter'", result)
-
-    def test_primary_finding_uses_geometry_cache_policy_message_before_raw_issue(self) -> None:
-        state = _create_state()
-        state.validate_warning_summary = ""
-        state.validate_issue_summary = "Geometry cache 'AlembicCharacter' is not yet portable to remote rendering in the current v1 flow."
-
-        result = bridge_panel._primary_finding(state)
-
-        self.assertIn("unsupported or non-portable simulation/cache state", result)
-        self.assertIn("Geometry cache 'AlembicCharacter'", result)
+        self.assertIn("render farm", bridge_panel._primary_finding(state))
+        self.assertEqual("Blocked", bridge_panel._primary_finding_policy(state))
 
     def test_dependency_plan_block_message_returns_primary_finding_only_when_blocked(self) -> None:
         state = _create_state()
@@ -237,15 +197,21 @@ class BridgePanelPolicyTests(unittest.TestCase):
 
         self.assertEqual("", result)
 
-    def test_dependency_plan_block_message_returns_simulation_policy_message_when_simulation_is_blocked(self) -> None:
+    def test_dependency_plan_block_message_blocks_simulation_when_local_bake_unavailable(self) -> None:
+        state = _create_state()
+        state.bake_strategy = "LOCAL"
+        state.validate_warning_summary = ""
+        state.validate_issue_summary = "Cloth simulation 'Pillow' is not yet portable to remote rendering in the current v1 flow."
+
+        self.assertIn("render farm", bridge_panel._dependency_plan_block_message(state))
+
+    def test_dependency_plan_block_message_empty_when_simulation_is_delegated_bake(self) -> None:
         state = _create_state()
         state.validate_warning_summary = ""
         state.validate_issue_summary = "Cloth simulation 'Pillow' is not yet portable to remote rendering in the current v1 flow."
 
-        result = bridge_panel._dependency_plan_block_message(state)
+        self.assertEqual("", bridge_panel._dependency_plan_block_message(state))
 
-        self.assertIn("unsupported or non-portable simulation/cache state", result)
-        self.assertIn("Cloth simulation 'Pillow'", result)
 
 if __name__ == "__main__":
     unittest.main()

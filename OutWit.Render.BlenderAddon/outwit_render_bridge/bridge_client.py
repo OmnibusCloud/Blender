@@ -154,6 +154,57 @@ class BridgeClient:
         _append_group(payload, selected_client_group_id)
         return self._post("RunRenderVideoAsync", RunRenderResponse.from_json, *payload)
 
+    # Bake-and-render variants: the controller delegates a simulation bake to the fastest node, then
+    # distributes the baked scene exactly like the plain run_render_* counterparts. Same arguments,
+    # same response shape; only the bridge method (and the bundled script it resolves) differs. Used
+    # when the scene has an unbaked simulation and the artist's bake strategy is "delegated".
+    def run_bake_and_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None, selected_client_group_id: str = "") -> RunRenderResponse:
+        payload = [scene_blob_id, frame, options, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunBakeAndRenderStillAsync", RunRenderResponse.from_json, *payload)
+
+    def run_bake_and_render_still_tiled(
+        self,
+        scene_blob_id: str,
+        frame: int,
+        tiles_x: int,
+        tiles_y: int,
+        options: dict[str, Any],
+        tile_options: dict[str, Any],
+        attached_files: list[dict[str, Any]] | None = None,
+        selected_client_group_id: str = "",
+    ) -> RunRenderResponse:
+        payload = [scene_blob_id, frame, tiles_x, tiles_y, options, tile_options, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunBakeAndRenderStillTiledAsync", RunRenderResponse.from_json, *payload)
+
+    def run_bake_and_render_frames(
+        self,
+        scene_blob_id: str,
+        start_frame: int,
+        end_frame: int,
+        options: dict[str, Any],
+        attached_files: list[dict[str, Any]] | None = None,
+        selected_client_group_id: str = "",
+    ) -> RunRenderResponse:
+        payload = [scene_blob_id, start_frame, end_frame, options, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunBakeAndRenderFramesAsync", RunRenderResponse.from_json, *payload)
+
+    def run_bake_and_render_video(
+        self,
+        scene_blob_id: str,
+        start_frame: int,
+        end_frame: int,
+        options: dict[str, Any],
+        video: dict[str, Any],
+        attached_files: list[dict[str, Any]] | None = None,
+        selected_client_group_id: str = "",
+    ) -> RunRenderResponse:
+        payload = [scene_blob_id, start_frame, end_frame, options, video, attached_files or []]
+        _append_group(payload, selected_client_group_id)
+        return self._post("RunBakeAndRenderVideoAsync", RunRenderResponse.from_json, *payload)
+
     def get_job(self, job_id: str) -> GetJobResponse:
         return self._post("GetJobAsync", GetJobResponse.from_json, job_id)
 

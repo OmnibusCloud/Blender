@@ -23,7 +23,9 @@ from enum import Enum
 
 from .bridge_dependency_policy import (
     get_dependency_portability_blocking_issue,
+    get_non_simulation_validation_issue,
     get_simulation_cache_blocking_issue,
+    resolve_bake_plan,
 )
 from .bridge_engine_routing import (
     recommended_render_mode,
@@ -338,16 +340,58 @@ def _engine_policy(state) -> str:
     return "Not checked"
 
 
+def _bake_plan(state):
+    """How the artist's bake strategy resolves the scene's simulation-cache block (if any).
+
+    The authoritative "is there an unbaked simulation?" signal is the validator/preflight
+    simulation-cache block (what the farm would refuse); the strategy decides whether a bake
+    covers it. Returns a ``BakePlan`` (see ``bridge_dependency_policy.resolve_bake_plan``)."""
+    from .bridge_dependency_policy import LOCAL_BAKE_AVAILABLE
+
+    return resolve_bake_plan(
+        bool(_simulation_cache_block(state)),
+        getattr(state, "bake_strategy", "DELEGATED"),
+        LOCAL_BAKE_AVAILABLE,
+    )
+
+
+def _simulation_bake_covers(state) -> bool:
+    """True when a chosen bake plan resolves the scene's simulation block, so the Render gate may
+    treat the simulation as non-blocking (it will be baked before the distributed render)."""
+    plan = _bake_plan(state)
+    return (plan.should_delegate or plan.should_local) and not plan.block
+
+
+def _residual_validation_issue(state) -> str:
+    """The hard validation issue that still blocks after accounting for the bake plan.
+
+    A simulation-cache issue is dropped when the bake plan covers it (the bake produces the cache);
+    a strategy that cannot bake (LOCAL before its driver ships) keeps the block; any non-simulation
+    issue always remains."""
+    merged = merge_unique_summaries(state.validate_issue_summary, _selected_mode_preflight_issue_summary(state))
+    if not merged:
+        return ""
+
+    plan = _bake_plan(state)
+    if plan.block:
+        return plan.block
+
+    if plan.should_delegate or plan.should_local:
+        return get_non_simulation_validation_issue(merged)
+
+    return first_summary_item(merged) or merged
+
+
 def _validation_policy(state) -> str:
     if not _has_validation_result(state):
         return "Not checked"
-    if state.validate_issue_summary:
+    if _residual_validation_issue(state):
         return "Blocked"
     if get_dependency_portability_blocking_issue(state.validate_warning_summary):
         return "Blocked"
     if state.validate_warning_summary:
         return "Ready with warnings"
-    return "Ready" if state.validate_is_valid else "Blocked"
+    return "Ready" if (state.validate_is_valid or _simulation_bake_covers(state)) else "Blocked"
 
 
 def _simulation_cache_block(state) -> str:
@@ -489,12 +533,17 @@ def _primary_blocker(scene, state) -> Blocker | None:
             "outwit.bridge_switch_format_to_png",
         )
 
+    # An unbaked simulation blocks UNLESS the chosen bake strategy covers it (delegated bake, or
+    # local once available). A strategy that cannot bake (LOCAL before its driver ships) blocks with
+    # its own guidance — the render must never start without a bake plan.
     simulation = _simulation_cache_block(state)
-    if simulation:
-        return Blocker(BlockerKind.POLICY, first_summary_item(simulation) or simulation)
+    if simulation and not _simulation_bake_covers(state):
+        plan = _bake_plan(state)
+        return Blocker(BlockerKind.POLICY, plan.block or first_summary_item(simulation) or simulation)
 
     if _validation_policy(state) == "Blocked":
-        message = first_summary_item(state.validate_issue_summary) \
+        residual = _residual_validation_issue(state)
+        message = first_summary_item(residual) \
             or _dependency_block(state) \
             or state.validate_message \
             or "Scene validation failed"

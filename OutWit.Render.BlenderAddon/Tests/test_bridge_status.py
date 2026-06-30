@@ -45,22 +45,37 @@ def _load_bridge_status():
     sys.modules[_PKG + ".bridge_engine_routing"] = routing
 
     deps = types.ModuleType(_PKG + ".bridge_dependency_policy")
-    # Defaults: nothing blocks. Tests override via _DEP_BLOCK / _SIM_BLOCK below.
+    # Defaults: nothing blocks. Tests override via _DEP_BLOCK / _SIM_BLOCK / _NONSIM_BLOCK below.
     deps.get_dependency_portability_blocking_issue = lambda summary: _DEP_BLOCK
     deps.get_simulation_cache_blocking_issue = lambda summary: _SIM_BLOCK
+    deps.get_non_simulation_validation_issue = lambda summary: _NONSIM_BLOCK
+    # The bake-plan decision is pure logic — use the REAL implementation (single source of truth) so
+    # the gate is tested against shipping behaviour, while the block *detection* stays controllable.
+    base = os.path.join(os.path.dirname(__file__), "..", "outwit_render_bridge")
+    real_dep_path = os.path.abspath(os.path.join(base, "bridge_dependency_policy.py"))
+    real_spec = importlib.util.spec_from_file_location(_PKG + "._real_dep", real_dep_path)
+    real_dep = importlib.util.module_from_spec(real_spec)
+    real_spec.loader.exec_module(real_dep)
+    deps.resolve_bake_plan = real_dep.resolve_bake_plan
+    deps.BakePlan = real_dep.BakePlan
+    deps.LOCAL_BAKE_UNAVAILABLE_MESSAGE = real_dep.LOCAL_BAKE_UNAVAILABLE_MESSAGE
+    # The local-bake feature gate lives in bridge_dependency_policy; bridge_status reads it lazily.
+    # Tests vary it via deps.LOCAL_BAKE_AVAILABLE (see _DEP_MODULE).
+    deps.LOCAL_BAKE_AVAILABLE = False
     sys.modules[_PKG + ".bridge_dependency_policy"] = deps
 
-    path = os.path.join(os.path.dirname(__file__), "..", "outwit_render_bridge", "bridge_status.py")
+    path = os.path.join(base, "bridge_status.py")
     spec = importlib.util.spec_from_file_location(_PKG + ".bridge_status", os.path.abspath(path))
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    return module, deps
 
 
-_DEP_BLOCK = ""   # mutated per-test to simulate a dependency-portability block
-_SIM_BLOCK = ""   # mutated per-test to simulate a simulation-cache block
-status = _load_bridge_status()
+_DEP_BLOCK = ""      # mutated per-test to simulate a dependency-portability block
+_SIM_BLOCK = ""      # mutated per-test to simulate a simulation-cache block
+_NONSIM_BLOCK = ""   # mutated per-test to simulate a NON-simulation hard validation issue
+status, _DEP_MODULE = _load_bridge_status()
 
 
 # --- Fakes ----------------------------------------------------------------------------------------
@@ -91,6 +106,8 @@ def make_state(**overrides):
         preflight_frames_issue_summary="", preflight_video_issue_summary="",
         preflight_still_warning_summary="", preflight_still_tiled_warning_summary="",
         preflight_frames_warning_summary="", preflight_video_warning_summary="",
+        # bake strategy (delegated by default — an unbaked sim is baked on the farm, not blocked)
+        bake_strategy="DELEGATED",
         # job
         active_job_id="", active_job_status="", active_job_error="", active_job_is_completed=False,
         active_job_progress="", active_job_cancel_requested=False,
@@ -104,9 +121,11 @@ def make_state(**overrides):
 class ComputeStatusTests(unittest.TestCase):
 
     def setUp(self):
-        global _DEP_BLOCK, _SIM_BLOCK
+        global _DEP_BLOCK, _SIM_BLOCK, _NONSIM_BLOCK
         _DEP_BLOCK = ""
         _SIM_BLOCK = ""
+        _NONSIM_BLOCK = ""
+        _DEP_MODULE.LOCAL_BAKE_AVAILABLE = False
 
     # --- connection / auth ladder ---
 
@@ -163,13 +182,48 @@ class ComputeStatusTests(unittest.TestCase):
         self.assertEqual(view.blocker.kind, status.BlockerKind.POLICY)
         self.assertIn("wood.png", view.blocker.message)
 
-    def test_simulation_cache_blocks(self):
+    def test_unbaked_simulation_with_delegated_strategy_is_ready_not_blocked(self):
+        # The default DELEGATED strategy bakes the simulation on the farm — an unbaked sim is no
+        # longer a blocker, it is a plan. (Regression guard for the bake-aware gate.)
         global _SIM_BLOCK
         _SIM_BLOCK = "Fluid simulation requires baked data"
         view = status.compute_status(make_scene(), make_state(
-            validate_job_id="v1", validate_issue_summary="x"))
+            validate_job_id="v1", validate_issue_summary="x", bake_strategy="DELEGATED"))
+        self.assertEqual(view.phase, status.Phase.READY)
+        self.assertTrue(view.is_ready)
+        self.assertIsNone(view.blocker)
+
+    def test_unbaked_simulation_with_local_strategy_blocks_until_driver_ships(self):
+        # LOCAL baking is not available yet, so it cannot resolve the block: render must refuse and
+        # point the artist at the render-farm option, never silently delegate or render unbaked.
+        global _SIM_BLOCK
+        _SIM_BLOCK = "Fluid simulation requires baked data"
+        view = status.compute_status(make_scene(), make_state(
+            validate_job_id="v1", validate_issue_summary="x", bake_strategy="LOCAL"))
+        self.assertEqual(view.phase, status.Phase.BLOCKED)
         self.assertEqual(view.blocker.kind, status.BlockerKind.POLICY)
-        self.assertIn("Fluid", view.blocker.message)
+        self.assertIn("render farm", view.blocker.message)
+
+    def test_unbaked_simulation_local_strategy_renders_when_driver_available(self):
+        global _SIM_BLOCK
+        _SIM_BLOCK = "Fluid simulation requires baked data"
+        _DEP_MODULE.LOCAL_BAKE_AVAILABLE = True
+        view = status.compute_status(make_scene(), make_state(
+            validate_job_id="v1", validate_issue_summary="x", bake_strategy="LOCAL"))
+        self.assertEqual(view.phase, status.Phase.READY)
+        self.assertTrue(view.is_ready)
+
+    def test_non_simulation_issue_still_blocks_even_with_bake_plan(self):
+        # A bake fixes only the simulation cache; an unrelated hard issue (e.g. missing texture)
+        # must still block even though the sim itself is covered by the delegated bake.
+        global _SIM_BLOCK, _NONSIM_BLOCK
+        _SIM_BLOCK = "Fluid simulation requires baked data"
+        _NONSIM_BLOCK = "Missing texture: wood.png"
+        view = status.compute_status(make_scene(), make_state(
+            validate_job_id="v1", validate_issue_summary="Fluid... | Missing texture: wood.png",
+            bake_strategy="DELEGATED"))
+        self.assertEqual(view.phase, status.Phase.BLOCKED)
+        self.assertIn("wood.png", view.blocker.message)
 
     def test_ready_when_signed_in_saved_supported_and_unchecked(self):
         view = status.compute_status(make_scene(), make_state())
@@ -314,9 +368,11 @@ class UnsupportedFormatBlockerTests(unittest.TestCase):
     image-producing modes."""
 
     def setUp(self):
-        global _DEP_BLOCK, _SIM_BLOCK
+        global _DEP_BLOCK, _SIM_BLOCK, _NONSIM_BLOCK
         _DEP_BLOCK = ""
         _SIM_BLOCK = ""
+        _NONSIM_BLOCK = ""
+        _DEP_MODULE.LOCAL_BAKE_AVAILABLE = False
 
     def test_targa_blocks_in_image_mode(self):
         view = status.compute_status(make_scene(file_format="TARGA"), make_state(render_mode="Still"))
@@ -393,9 +449,11 @@ class TargetResolutionTests(unittest.TestCase):
 class SwitchFormatBlockerTests(unittest.TestCase):
 
     def setUp(self):
-        global _DEP_BLOCK, _SIM_BLOCK
+        global _DEP_BLOCK, _SIM_BLOCK, _NONSIM_BLOCK
         _DEP_BLOCK = ""
         _SIM_BLOCK = ""
+        _NONSIM_BLOCK = ""
+        _DEP_MODULE.LOCAL_BAKE_AVAILABLE = False
 
     def test_unsupported_format_blocks_with_png_fix(self):
         view = status.compute_status(make_scene(file_format="TARGA"), make_state())

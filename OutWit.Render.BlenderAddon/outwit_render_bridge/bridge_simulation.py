@@ -18,14 +18,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Feature gate for the LOCAL bake strategy. Delegated baking (on the fastest node, via
-# ``Render.BakeSimulation`` + ``Grid.Delegate``) is the shipped default and is always available; the
-# local-bake driver (a modal bake in the artist's Blender with native progress, plus a fluid-cache
-# collector) lands in a later step. Until then the launch gate must refuse a LOCAL choice for an
-# unbaked simulation rather than silently delegate or — worse — render it unbaked. Flip to ``True``
-# once the local driver ships. See ``bridge_dependency_policy.resolve_bake_plan``.
-LOCAL_BAKE_AVAILABLE = False
-
 # Bakeable simulation kinds, as user-facing labels. Keep these stable — they appear in the panel and
 # in the launch-gate message.
 SIM_FLUID = "Fluid"
