@@ -104,5 +104,63 @@ class BridgeDependencyPolicyTests(unittest.TestCase):
         self.assertEqual("", result)
 
 
+class NonSimulationValidationIssueTests(unittest.TestCase):
+    def test_returns_empty_when_only_simulation_issues_present(self) -> None:
+        summary = "Cloth simulation 'Pillow' is not yet portable. | Fluid domain 'Domain' requires baked simulation data before remote rendering."
+
+        self.assertEqual("", bridge_dependency_policy.get_non_simulation_validation_issue(summary))
+
+    def test_returns_the_non_simulation_issue_when_mixed(self) -> None:
+        summary = "Cloth simulation 'Pillow' is not yet portable. | Scene uses an unsupported render engine 'OCTANE'."
+
+        result = bridge_dependency_policy.get_non_simulation_validation_issue(summary)
+
+        self.assertEqual("Scene uses an unsupported render engine 'OCTANE'.", result)
+
+    def test_returns_empty_for_empty_summary(self) -> None:
+        self.assertEqual("", bridge_dependency_policy.get_non_simulation_validation_issue(""))
+
+
+class ResolveBakePlanTests(unittest.TestCase):
+    def test_no_simulation_renders_directly(self) -> None:
+        plan = bridge_dependency_policy.resolve_bake_plan(False, "DELEGATED", local_bake_available=True)
+
+        self.assertEqual((False, False, ""), tuple(plan))
+
+    def test_delegated_bakes_on_the_farm(self) -> None:
+        plan = bridge_dependency_policy.resolve_bake_plan(True, "DELEGATED", local_bake_available=False)
+
+        self.assertTrue(plan.should_delegate)
+        self.assertFalse(plan.should_local)
+        self.assertEqual("", plan.block)
+
+    def test_local_bakes_here_when_available(self) -> None:
+        plan = bridge_dependency_policy.resolve_bake_plan(True, "LOCAL", local_bake_available=True)
+
+        self.assertFalse(plan.should_delegate)
+        self.assertTrue(plan.should_local)
+        self.assertEqual("", plan.block)
+
+    def test_local_blocks_when_not_available(self) -> None:
+        plan = bridge_dependency_policy.resolve_bake_plan(True, "LOCAL", local_bake_available=False)
+
+        self.assertFalse(plan.should_delegate)
+        self.assertFalse(plan.should_local)
+        self.assertEqual(bridge_dependency_policy.LOCAL_BAKE_UNAVAILABLE_MESSAGE, plan.block)
+
+    def test_unknown_strategy_falls_back_to_delegated(self) -> None:
+        # A corrupt/empty stored value must never block or silently render unbaked: delegated baking
+        # is always available and safe, so it is the fallback.
+        for strategy in ("", "bogus", None):
+            plan = bridge_dependency_policy.resolve_bake_plan(True, strategy, local_bake_available=False)
+            self.assertTrue(plan.should_delegate, strategy)
+            self.assertEqual("", plan.block, strategy)
+
+    def test_strategy_is_case_insensitive(self) -> None:
+        plan = bridge_dependency_policy.resolve_bake_plan(True, "local", local_bake_available=True)
+
+        self.assertTrue(plan.should_local)
+
+
 if __name__ == "__main__":
     unittest.main()

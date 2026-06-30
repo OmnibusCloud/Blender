@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import NamedTuple
+
 DEPENDENCY_PORTABILITY_BLOCK_PREFIX = (
     "Current v1 policy blocks scenes with unresolved external dependencies unless they are transferred through the supported packed-image or attachment-backed dependency paths."
 )
@@ -92,3 +94,64 @@ def get_simulation_cache_blocking_issue(summary: str) -> str:
             return f"{_simulation_cache_blocking_prefix(item)} {item}"
 
     return ""
+
+
+def get_non_simulation_validation_issue(summary: str) -> str:
+    """The first hard validation issue that is NOT a bakeable simulation/cache block.
+
+    The launch gate may bypass a simulation-cache block when the artist has chosen a bake plan
+    (the bake produces the missing cache), but ANY other validation failure — a missing engine,
+    an unsupported feature — must still block. This isolates "is the scene invalid for a reason a
+    bake won't fix?" from the summary the cloud validator returned.
+    """
+    for item in _summary_items(summary):
+        if not _is_simulation_cache_issue(item):
+            return item
+
+    return ""
+
+
+# How the artist's bake strategy resolves (or fails to resolve) an unbaked simulation, computed
+# without bpy so it is headless-testable. The launch gate and the panel both read this verdict.
+class BakePlan(NamedTuple):
+    should_delegate: bool  # bake on the fastest node (Render.BakeSimulation via Grid.Delegate)
+    should_local: bool     # bake here, in the artist's Blender, before upload
+    block: str             # non-empty = the chosen plan cannot bake the sim; launch must refuse
+
+
+LOCAL_BAKE_UNAVAILABLE_MESSAGE = (
+    "Local baking is not available yet — choose “On render farm” to bake the "
+    "simulation before rendering."
+)
+
+
+def resolve_bake_plan(
+    has_unbaked_simulation: bool,
+    bake_strategy: str,
+    local_bake_available: bool,
+) -> BakePlan:
+    """Decide how an unbaked simulation is handled before a distributed render.
+
+    The single source of truth for the launch gate's "may this scene render, and how?" question:
+
+    * no unbaked simulation -> render directly, no bake (``BakePlan(False, False, "")``);
+    * ``DELEGATED`` (the default, and anything other than ``LOCAL``) -> the farm bakes on the
+      fastest node, then renders the baked scene;
+    * ``LOCAL`` while local baking is available -> bake here, then render the baked scene;
+    * ``LOCAL`` while it is NOT available yet -> ``block`` set: the launch must refuse rather than
+      silently delegate or render the simulation unbaked.
+
+    ``has_unbaked_simulation`` is the gate's authoritative signal — at launch it comes from the cloud
+    validator's simulation-cache block; in the panel it comes from the local scene scan.
+    """
+    if not has_unbaked_simulation:
+        return BakePlan(False, False, "")
+
+    if (bake_strategy or "").strip().upper() == "LOCAL":
+        if local_bake_available:
+            return BakePlan(False, True, "")
+        return BakePlan(False, False, LOCAL_BAKE_UNAVAILABLE_MESSAGE)
+
+    # DELEGATED (default) — also the safe fallback for an unexpected/corrupt value, since delegated
+    # baking is always available and never silently produces a wrong result.
+    return BakePlan(True, False, "")
