@@ -296,6 +296,10 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     # the launch merges them into the upload manifest without re-uploading).
     local_bake_in_progress: BoolProperty(name="Local Bake In Progress", default=False)
     local_bake_fluid_manifest_json: StringProperty(name="Local Bake Fluid Manifest Json", default="")
+    # The .blend path + mtime the fluid manifest was baked against — the manifest is merged into an upload
+    # ONLY when both still match, so a stale manifest never attaches to a different or edited scene.
+    local_bake_source_path: StringProperty(name="Local Bake Source Path", default="")
+    local_bake_source_mtime: StringProperty(name="Local Bake Source Mtime", default="")
     uploaded_attachment_manifest_json: StringProperty(name="Uploaded Attachment Manifest Json", default="")
     upload_message: StringProperty(name="Upload Message", default="")
     dependency_plan_total_count: IntProperty(name="Dependency Plan Total Count", default=0)

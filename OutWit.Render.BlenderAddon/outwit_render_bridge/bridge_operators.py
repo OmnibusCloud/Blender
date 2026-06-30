@@ -285,6 +285,35 @@ def _get_uploaded_attachment_manifest(state) -> list[dict[str, object]]:
     return value if isinstance(value, list) else []
 
 
+def _local_bake_fluid_attachments(state) -> list[dict[str, object]]:
+    """Fluid-cache attachments collected by a local bake — but only when they still belong to the current
+    .blend (same path + mtime). After a save/edit they are discarded, so a stale manifest never attaches to
+    a different or modified scene."""
+    raw = getattr(state, "local_bake_fluid_manifest_json", "") or ""
+    if not raw:
+        return []
+
+    current_path = bpy.data.filepath or ""
+    if getattr(state, "local_bake_source_path", "") != current_path:
+        return []
+    if getattr(state, "local_bake_source_mtime", "") != _blend_file_mtime(current_path):
+        return []
+
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+
+    return value if isinstance(value, list) else []
+
+
+def _planned_upload_attachments(state) -> list[dict[str, object]]:
+    """Scene attachments to upload: the normally-collected dependencies PLUS any fluid caches from a local
+    bake (already uploaded — merged so the farm manifest includes them; _upload_scene_attachments skips
+    re-uploading entries that already carry a BlobId)."""
+    return list(collect_scene_attachment_metadata()) + _local_bake_fluid_attachments(state)
+
+
 def _apply_dependency_plan(state, attachments: list[dict[str, object]]) -> None:
     summary = summarize_scene_attachment_metadata(attachments)
     state.dependency_plan_total_count = int(summary.get("TotalCount") or 0)
@@ -300,7 +329,10 @@ def _upload_scene_attachments(client: BridgeClient, attachments: list[dict[str, 
     for attachment in attachments:
         current = dict(attachment)
         packaging_strategy = str(current.get("PackagingStrategy") or "")
-        if packaging_strategy == "SceneAttachmentBlob":
+        # Skip entries that already carry a BlobId — locally-baked fluid caches are uploaded during the
+        # bake (their OriginalPath is the //-relative ref, not a readable source path), so re-uploading
+        # here would fail; they pass through unchanged.
+        if packaging_strategy == "SceneAttachmentBlob" and not str(current.get("BlobId") or ""):
             source_path = str(current.get("OriginalPath") or "")
             response = client.upload_file(source_path)
             current["BlobId"] = response.blob_id
@@ -645,7 +677,7 @@ def _upload_current_blend(context):
     client = _get_bridge_client(context)
     blend_path = _get_current_blend_path()
     output_signature = scene_output_signature(context.scene)
-    planned_attachments = collect_scene_attachment_metadata()
+    planned_attachments = _planned_upload_attachments(state)
     _apply_dependency_plan(state, planned_attachments)
     attachments = _upload_scene_attachments(client, planned_attachments)
     upload_message = ""
@@ -1683,6 +1715,10 @@ class OUTWIT_OT_bridge_bake_local(Operator):
         self._index = 0
         self._announced = -1
         state.local_bake_in_progress = True
+        # Drop any previous bake's manifest up front — this bake produces a fresh one on completion.
+        state.local_bake_fluid_manifest_json = ""
+        state.local_bake_source_path = ""
+        state.local_bake_source_mtime = ""
         state.last_error = ""
         state.status_message = "Baking locally…"
         self._timer = context.window_manager.event_timer_add(0.15, window=context.window)
@@ -1736,7 +1772,10 @@ class OUTWIT_OT_bridge_bake_local(Operator):
             _tag_job_areas_redraw()
             return {"CANCELLED"}
 
+        baked_path = bpy.data.filepath or ""
         state.local_bake_fluid_manifest_json = json.dumps(fluid_attachments, ensure_ascii=False)
+        state.local_bake_source_path = baked_path
+        state.local_bake_source_mtime = _blend_file_mtime(baked_path)
         state.local_bake_in_progress = False
         _refresh_bridge_state(context)  # re-scan: the simulation now reads as baked
         state.status_message = (f"Local bake complete ({len(fluid_attachments)} fluid cache file(s) collected)."
@@ -2179,7 +2218,7 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             return self._begin_deferred_tail(context, ensure_modal=True)
 
         try:
-            planned_attachments = collect_scene_attachment_metadata()
+            planned_attachments = _planned_upload_attachments(state)
         except Exception as ex:
             state.last_error = str(ex)
             state.status_message = "Failed to collect scene attachments."
