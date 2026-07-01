@@ -18,10 +18,12 @@ name: addon
 #   Required repo secrets: APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_ID,
 #   APPLE_APP_PASSWORD, APPLE_TEAM_ID. The job degrades to a no-op (with a warning) until they
 #   are configured, so unsigned debug releases keep working.
-# - Windows: PLACEHOLDER — the SSL.com IV certificate has not been issued yet. When it arrives,
-#   add an eSigner CodeSignTool step over outwit_render_bridge/bridge/win-x64/self-contained/
-#   OutWit.Render.BlenderBridge.exe before the win zip is attached (see the client pipeline for
-#   the secret plumbing pattern).
+# - Windows: a dedicated sign-windows job Authenticode-signs the bundled bridge .exe via SSL.com
+#   eSigner (cloud CodeSignTool) — the same mechanism + secrets as the WitCloud client release.
+#   Required repo secrets: ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_CREDENTIAL_ID,
+#   ESIGNER_TOTP_SECRET. The eSigner tier is quota-limited (~240/yr), so the job signs public tags
+#   (-beta / stable / -rc) but NOT internal iteration tags (-dev/-test/-internal); it degrades to a
+#   no-op (ships UNSIGNED, with a warning) when the secrets are absent.
 # - Linux: no per-binary signing (per the signing strategy); the release ships SHA256SUMS and a
 #   detached GPG signature when GPG_PRIVATE_KEY/GPG_PASSPHRASE are configured.
 #
@@ -194,8 +196,97 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
+  sign-windows:
+    name: sign Windows bridge (SSL.com eSigner)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: addon-win-x64
+          path: stage
+
+      # Authenticode-sign the bundled bridge .exe via SSL.com eSigner (cloud) — the same mechanism the
+      # WitCloud client release uses (ESIGNER_* secrets). The eSigner tier is quota-limited (~240/yr), so
+      # sign every tag EXCEPT internal iteration tags (-dev/-test/-internal); the public `-beta`/stable
+      # releases ARE signed. No-op (ships UNSIGNED) when the ESIGNER_* secrets are absent, so the release
+      # still ships. macOS notarization + Linux GPG/SHA256SUMS are unaffected.
+      - name: Decide Windows signing
+        id: gate
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+        run: |
+          set -euo pipefail
+          should=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then should=true; fi
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            case "${{ github.ref_name }}" in
+              *-dev*|*-test*|*-internal*) : ;;   # internal iteration tag → don't sign (save quota)
+              *) should=true ;;                  # public release (-beta / stable / -rc) → sign
+            esac
+          fi
+          if [ -z "${ESIGNER_USERNAME:-}" ]; then
+            [ "$should" = "true" ] && echo "::warning::Windows signing requested but ESIGNER_* secrets are not set — shipping the Windows package UNSIGNED."
+            should=false
+          fi
+          echo "enabled=$should" >> "$GITHUB_OUTPUT"
+          echo "Windows signing: enabled=$should"
+
+      - name: Unpack the addon package
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          ZIP=$(ls stage/*.zip | head -1)
+          echo "ZIP_NAME=$(basename "$ZIP")" >> "$GITHUB_ENV"
+          WORK="$RUNNER_TEMP/addon"; rm -rf "$WORK"; mkdir -p "$WORK"
+          unzip -q "$ZIP" -d "$WORK"
+          BRIDGE=$(find "$WORK" -type f -name 'OutWit.Render.BlenderBridge.exe' | head -1)
+          if [ -z "$BRIDGE" ]; then
+            echo "::error::bridge .exe not found inside the Windows package"; exit 1
+          fi
+          echo "Bridge binary: $BRIDGE"
+          echo "BRIDGE_PATH=$BRIDGE" >> "$GITHUB_ENV"
+          echo "WORK_DIR=$WORK" >> "$GITHUB_ENV"
+
+      # CodeSignTool copies the signed file into output_path (errors if it equals the input dir), so sign
+      # into a separate dir and move it back. We sign only the bridge .exe — the native binary Windows /
+      # SmartScreen evaluate — not the inner DLLs.
+      - name: Sign the bridge (SSL.com eSigner)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          file_path: ${{ env.BRIDGE_PATH }}
+          output_path: ${{ runner.temp }}/signed
+          malware_block: 'false'
+          environment_name: PROD
+
+      - name: Repack with the signed bridge
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          mv -f "$RUNNER_TEMP/signed/OutWit.Render.BlenderBridge.exe" "$BRIDGE_PATH"
+          (cd "$WORK_DIR" && zip -qry "$RUNNER_TEMP/$ZIP_NAME" .)
+          rm -rf stage-signed; mkdir -p stage-signed
+          mv -f "$RUNNER_TEMP/$ZIP_NAME" "stage-signed/$ZIP_NAME"
+          echo "Repacked the Windows package with the signed bridge."
+
+      - name: Upload signed package
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-win-x64
+          path: stage-signed/*.zip
+          overwrite: true
+          if-no-files-found: error
+
   release:
-    needs: [build, sign-macos]
+    needs: [build, sign-macos, sign-windows]
     if: startsWith(github.ref, 'refs/tags/addon-v')
     runs-on: ubuntu-latest
     steps:
