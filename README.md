@@ -27,8 +27,9 @@ Two cooperating components ship in a single extension zip:
 3. Open the **OmnibusCloud** tab in the 3D-viewport sidebar (`N` key) and click
    **Sign In** — the system browser opens, sign in with your OmnibusCloud account.
 
-Every release ships a `SHA256SUMS` file with a detached GPG signature; the macOS bridge
-binary is code-signed and notarized.
+Every release ships a `SHA256SUMS` file with a detached GPG signature, and the bundled
+bridge binary is code-signed on every platform — macOS (Developer ID, notarized), Windows
+(Authenticode, via SSL.com eSigner), and Linux (the signed checksums above).
 
 ---
 
@@ -36,6 +37,10 @@ binary is code-signed and notarized.
 
 - **Output** — `Image` (a single frame, optionally split into tiles across machines) or
   `Animation` (a frame range, delivered as an image sequence or an encoded video).
+- **Simulations** — if the scene has a simulation (fluid, cloth, particles, Geometry
+  Nodes, …), choose where it's baked before rendering: **on the render farm** or **on this
+  computer**. Render won't start until a bake is planned, so a simulation is never rendered
+  as a broken single frame. See [Simulations](#simulations) below.
 - **Target** — the whole network, or one of the client groups you are authorized to use.
 - **Render** — one click. The addon packs the saved `.blend` with its assets and uploads
   it through the bridge off the UI thread; the server splits the work and dispatches it
@@ -79,6 +84,34 @@ binary is code-signed and notarized.
   adjustable where the codec supports it.
 - Verified with Cycles, Eevee, and Grease Pencil scenes.
 
+### Simulations
+
+A sequential simulation can't be rendered distributed as-is: frame *N* depends on frames
+*1…N-1*, which a render node never sees. The addon detects simulations and bakes them into
+a frame-addressable cache first, so the baked scene distributes correctly. Rendering is
+**gated** — it won't start until a bake is planned, so a simulation never renders as a
+frozen or single-frame result.
+
+Detected: **Mantaflow fluid** (gas/smoke and liquid domains), **cloth**, **soft body**,
+**dynamic paint**, **dynamic particles**, **rigid body**, and **Geometry-Nodes simulation
+zones**. (Static hair, which regenerates deterministically, is not treated as a simulation.)
+
+When the scene contains a simulation, a **bake strategy** chooser appears:
+
+- **On render farm** *(default)* — the simulation is baked once on the fastest available
+  node (chosen by the same throughput benchmark used to distribute frames), then the baked
+  scene is split and rendered across the network. Nothing to prepare; your machine and your
+  `.blend` are left untouched. Fluid caches are sliced per frame so each node downloads only
+  what it renders.
+- **On this computer** — the addon bakes the simulation in your own Blender before upload,
+  using Blender's native bake with a per-simulation progress readout (and Esc to cancel),
+  then the already-baked scene renders across the network. This **bakes into and saves your
+  `.blend`** (point caches to memory, Geometry-Nodes zones packed, fluid to an OpenVDB cache
+  that ships with the job) — a confirmation prompt appears first.
+
+Either way the distributed render is identical; the only difference is *where* the one-time
+bake runs. An unbaked simulation is never sent to a plain render.
+
 ### Targeting
 
 - Render on the whole network, or on one of your authorized client groups — the choice
@@ -104,13 +137,26 @@ binary is code-signed and notarized.
 - Results download through the bridge: open the file, open the folder, or load the
   image straight into Blender.
 
+### Reliability
+
+- **Fault-tolerant distribution** — if a machine fails or crashes on its assigned chunk,
+  those frames are reassigned to the remaining healthy machines and retried, instead of
+  failing the whole job. A job fails only when no machine can complete the work (a real
+  scene error), reported with the failing node's message.
+- **Smart GPU selection** — each node auto-selects its best render backend
+  (OptiX → CUDA → HIP → Metal). If a GPU render crashes, it tries the next available GPU
+  backend before falling back to CPU (and goes straight to CPU on an out-of-memory failure);
+  a node remembers what worked so it doesn't re-try a bad backend every frame. One flaky GPU
+  slows a node down at worst — it doesn't fail the job.
+
 ### Panel & settings
 
 - One status line and at most one actionable blocker (with a fix button) at any moment;
   diagnostics live in a collapsed Advanced section (connection control, account & scope,
   scene summary, manual validate/preflight, last error, component versions).
 - The panel suggests a suitable mode for the scene you open (e.g. Animation for a
-  video-format scene) but never launches anything by itself.
+  multi-frame or video-format scene, so a simulation isn't rendered as one frame by
+  mistake) but never switches or launches anything by itself.
 - Render settings (frame splitting, tiles, video preset, quality, target) persist per
   OS user across sessions; scene-bound values (format, frame, FPS) live in the `.blend`
   itself. A master toggle in the add-on preferences turns persistence off.
@@ -142,8 +188,9 @@ inside (`outwit_render_bridge/bridge/<rid>/...`):
   → zips in `dist/`. See the [addon README](OutWit.Render.BlenderAddon/README.md) for
   options and details.
 - CI: [`.github/workflows/addon.yml`](.github/workflows/addon.yml) — an `addon-v*` tag
-  builds all three platforms, signs and notarizes the macOS bridge, generates
-  `SHA256SUMS` (+ GPG signature), and attaches everything to the GitHub Release.
+  builds all three platforms, code-signs the bundled bridge (macOS notarized, Windows
+  Authenticode), generates `SHA256SUMS` (+ GPG signature), and attaches everything to the
+  GitHub Release.
 
 ---
 

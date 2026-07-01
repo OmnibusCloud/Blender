@@ -31,8 +31,9 @@ compiled into the bridge binary.
 Linux/macOS packages must carry the executable bit on the bridge binary, which zips
 created on Windows cannot store — release packages are therefore built by CI on a Linux
 runner ([`.github/workflows/addon.yml`](../.github/workflows/addon.yml)), which also
-signs and notarizes the macOS bridge and attaches everything to the GitHub Release on an
-`addon-v*` tag. Windows-built unix zips are fine for working on the addon itself.
+code-signs the bundled bridge (macOS Developer-ID + notarized; Windows Authenticode via
+SSL.com eSigner) and attaches everything to the GitHub Release on an `addon-v*` tag.
+Windows-built unix zips are fine for working on the addon itself.
 
 ## Install from disk
 
