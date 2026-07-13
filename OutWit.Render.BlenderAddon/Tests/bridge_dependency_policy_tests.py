@@ -96,6 +96,26 @@ class BridgeDependencyPolicyTests(unittest.TestCase):
         self.assertIn("unsupported or non-portable simulation/cache state", result)
         self.assertIn("Geometry cache 'AlembicCharacter'", result)
 
+    def test_get_simulation_cache_blocking_issue_classifies_rigid_body_requires_baked_message(self) -> None:
+        # The 1.23.18+ validator wording — must resolve to a bake plan (delegated/local), not a hard block.
+        summary = "Rigid body simulation requires baked simulation data before remote rendering."
+
+        result = bridge_dependency_policy.get_simulation_cache_blocking_issue(summary)
+
+        self.assertIn("require baked data before remote rendering", result)
+        self.assertIn("Rigid body simulation requires baked simulation data", result)
+
+    def test_get_simulation_cache_blocking_issue_classifies_legacy_rigid_body_message(self) -> None:
+        # A pre-1.23.18 server still emits the old hard-block wording; the addon must classify it as a
+        # bake-resolvable simulation issue so mixed fleets keep working.
+        summary = ("Rigid body simulation 'CellFracture_Breaker' is not yet portable to remote rendering "
+                   "in the current v1 flow. Bake it to keyframes or Alembic and re-submit.")
+
+        result = bridge_dependency_policy.get_simulation_cache_blocking_issue(summary)
+
+        self.assertIn("unsupported or non-portable simulation/cache state", result)
+        self.assertIn("Rigid body simulation 'CellFracture_Breaker'", result)
+
     def test_get_simulation_cache_blocking_issue_returns_empty_for_non_simulation_issue(self) -> None:
         summary = "Scene uses external image asset 'Texture' from '/tmp/texture.png'."
 

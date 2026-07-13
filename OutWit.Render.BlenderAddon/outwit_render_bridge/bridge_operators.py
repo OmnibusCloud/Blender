@@ -1667,6 +1667,14 @@ def _bake_point_caches() -> None:
                     point_cache.use_disk_cache = False
                 except Exception:
                     pass
+    # The rigid body world cache is SCENE-level (not on a modifier) — force it to memory too, so the
+    # baked world travels EMBEDDED in the saved .blend (mirrors the controller's Render.BakeSimulation).
+    rigidbody_world = getattr(bpy.context.scene, "rigidbody_world", None)
+    if rigidbody_world is not None and getattr(rigidbody_world, "point_cache", None) is not None:
+        try:
+            rigidbody_world.point_cache.use_disk_cache = False
+        except Exception:
+            pass
     try:
         bpy.ops.ptcache.free_bake_all()
     except Exception:

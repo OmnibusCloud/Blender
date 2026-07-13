@@ -68,6 +68,11 @@ def _is_simulation_cache_issue(message: str) -> bool:
         "fluid domain" in normalized
         or "cloth simulation" in normalized
         or "particle simulation" in normalized
+        # Rigid body bakes through the same embedded point-cache path as cloth (both bake paths run
+        # ptcache.bake_all over the scene's rigidbody_world), so its issue is resolvable by a bake plan.
+        # Matching the sim NAME keeps this true for both the 1.23.18+ validator wording ("requires baked
+        # simulation data", matched below) and the old hard-block wording from a pre-1.23.18 server.
+        or "rigid body simulation" in normalized
         or "geometry cache" in normalized
         or "requires baked simulation data" in normalized
         or "requires baked mesh cache" in normalized
