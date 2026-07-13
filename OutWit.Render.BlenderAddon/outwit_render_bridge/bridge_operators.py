@@ -1667,14 +1667,10 @@ def _bake_point_caches() -> None:
                     point_cache.use_disk_cache = False
                 except Exception:
                     pass
-    # The rigid body world cache is SCENE-level (not on a modifier) — force it to memory too, so the
-    # baked world travels EMBEDDED in the saved .blend (mirrors the controller's Render.BakeSimulation).
-    rigidbody_world = getattr(bpy.context.scene, "rigidbody_world", None)
-    if rigidbody_world is not None and getattr(rigidbody_world, "point_cache", None) is not None:
-        try:
-            rigidbody_world.point_cache.use_disk_cache = False
-        except Exception:
-            pass
+    # DO NOT touch use_disk_cache on the SCENE-level rigidbody_world point cache: assigning that RNA
+    # property fires BKE_ptcache_toggle_disk_cache, which SEGFAULTS Blender for the object-less scene
+    # cache (reproduced on the lava demo). Its cache defaults to memory anyway; ptcache.bake_all below
+    # bakes it, and the memory cache embeds in the saved .blend.
     try:
         bpy.ops.ptcache.free_bake_all()
     except Exception:
