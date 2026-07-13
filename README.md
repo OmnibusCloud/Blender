@@ -102,15 +102,22 @@ When the scene contains a simulation, a **bake strategy** chooser appears:
   node (chosen by the same throughput benchmark used to distribute frames), then the baked
   scene is split and rendered across the network. Nothing to prepare; your machine and your
   `.blend` are left untouched. Fluid caches are sliced per frame so each node downloads only
-  what it renders.
+  what it renders, and the bake reports **live per-frame progress** — a minutes-long
+  simulation visibly advances instead of looking stalled.
 - **On this computer** — the addon bakes the simulation in your own Blender before upload,
-  using Blender's native bake with a per-simulation progress readout (and Esc to cancel),
-  then the already-baked scene renders across the network. This **bakes into and saves your
-  `.blend`** (point caches to memory, Geometry-Nodes zones packed, fluid to an OpenVDB cache
-  that ships with the job) — a confirmation prompt appears first.
+  with a per-step progress readout (and Esc to cancel), then the already-baked scene renders
+  across the network. This **bakes into and saves your `.blend`** (point caches to memory,
+  Geometry-Nodes zones packed, fluid to an OpenVDB cache that ships with the job) — a
+  confirmation prompt appears first. A scene baked earlier on this computer is re-used on
+  the next render of the same file — including after a Blender restart — as long as its
+  cache still covers the requested frames.
 
 Either way the distributed render is identical; the only difference is *where* the one-time
 bake runs. An unbaked simulation is never sent to a plain render.
+
+> **Known limitation:** a rigid body world whose point cache is set to **Disk Cache** cannot
+> travel with the scene; the job fails with a clear message — switch the Rigid Body World
+> cache back to memory (the Blender default), save, and re-submit.
 
 ### Targeting
 

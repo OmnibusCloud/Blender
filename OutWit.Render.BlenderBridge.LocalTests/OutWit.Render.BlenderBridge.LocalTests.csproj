@@ -9,7 +9,7 @@
 
       These tests run the REAL render controller in-process via the public OutWit.Engine.Sdk
       (no WitCloud server, no online clients, no deploy cycle). They Assert.Ignore when no
-      host Blender runtime is available. See ../OutWit.Render.BlenderBridge.Tests/TIER_B_LOCAL_CONTROLLER_PLAN.md.
+      host Blender runtime is available.
   -->
 
   <PropertyGroup>

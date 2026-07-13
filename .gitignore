@@ -113,3 +113,4 @@ Migrations/
 __pycache__/
 *.py[cod]
 *.egg-info/
+TIER_B_LOCAL_CONTROLLER_PLAN.md
