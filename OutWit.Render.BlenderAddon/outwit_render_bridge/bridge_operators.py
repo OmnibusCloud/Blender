@@ -1464,6 +1464,36 @@ def _point_cache_baked(point_cache) -> bool:
     return bool(getattr(point_cache, "is_baked", False)) if point_cache is not None else False
 
 
+def _fluid_domain_baked(domain) -> bool:
+    """True when a fluid domain has a usable cache. Prefers Blender's has_cache_baked_data flag, but a
+    REPLAY-mode bake (the local-bake recipe) writes real cache DATA while leaving that flag False, so a
+    cache directory holding DATA (.vdb / .bobj.gz) for its LAST frame (cache_frame_end) also counts as
+    baked. Keying on the end frame avoids the single current-frame slice Blender writes for an UNBAKED
+    domain on save (and stray scrubbed frames / config '*.uni'). None-safe. Mirrors BlenderValidationScript."""
+    if domain is None:
+        return False
+    if bool(getattr(domain, "has_cache_baked_data", getattr(domain, "is_cache_baked_data", False))):
+        return True
+    end_frame = int(getattr(domain, "cache_frame_end", 0) or 0)
+    if end_frame <= 0:
+        return False
+    cache_dir = str(getattr(domain, "cache_directory", "") or "")
+    if not cache_dir:
+        return False
+    resolved = bpy.path.abspath(cache_dir)
+    if not resolved or not os.path.isdir(resolved):
+        return False
+    for _root, _dirs, files in os.walk(resolved):
+        for name in files:
+            low = name.lower()
+            if not (low.endswith(".vdb") or low.endswith(".bobj.gz")):
+                continue
+            frame_match = re.search(r"_(\d+)\.", name)
+            if frame_match and int(frame_match.group(1)) == end_frame:
+                return True
+    return False
+
+
 def _dynamic_paint_baked(modifier) -> bool:
     """True when any Dynamic Paint canvas surface is baked (its cache lives per-surface, not on the
     modifier)."""
@@ -1507,9 +1537,7 @@ def _scan_scene_simulations(scene):
                 modifier_type = getattr(modifier, "type", "")
                 if modifier_type == "FLUID" and getattr(modifier, "fluid_type", "") == "DOMAIN":
                     domain = getattr(modifier, "domain_settings", None)
-                    baked = bool(getattr(domain, "has_cache_baked_data",
-                                         getattr(domain, "is_cache_baked_data", False))) if domain else False
-                    descriptors.append(SimulationDescriptor(SIM_FLUID, baked))
+                    descriptors.append(SimulationDescriptor(SIM_FLUID, _fluid_domain_baked(domain)))
                 elif modifier_type == "CLOTH":
                     descriptors.append(SimulationDescriptor(SIM_CLOTH, _point_cache_baked(getattr(modifier, "point_cache", None))))
                 elif modifier_type == "SOFT_BODY":
@@ -1570,12 +1598,14 @@ def _local_fluid_domains(scene):
 
 def _configure_fluid_domain(obj, domain, index: int, start_frame: int, end_frame: int) -> None:
     # Unique in-blend-dir cache per domain (avoids name collisions / escaping paths); OpenVDB density grid
-    # + cache_type='ALL' so every frame is written; bake from the sim's natural start (a liquid mesh only
+    # + cache_type='REPLAY' so the solver writes each frame as the timeline is stepped (see the bake steps).
+    # cache_type='ALL' would need the modal bpy.ops.fluid.bake_all(), which no-ops OR crashes Blender when
+    # driven from this addon's own modal operator. Bake from the sim's natural start (a liquid mesh only
     # displays from a cache contiguous from the start) up to the render end.
     sanitized = re.sub(r"[^A-Za-z0-9_]", "_", obj.name)
     domain.cache_directory = "//cache_%d_%s" % (index, sanitized)
     domain.cache_data_format = "OPENVDB"
-    domain.cache_type = "ALL"
+    domain.cache_type = "REPLAY"
     existing_start = int(getattr(domain, "cache_frame_start", 1) or 1)
     domain.cache_frame_start = max(1, min(existing_start, start_frame))
     domain.cache_frame_end = max(domain.cache_frame_start, end_frame)
@@ -1586,15 +1616,43 @@ def _configure_fluid_domain(obj, domain, index: int, start_frame: int, end_frame
             pass
 
 
-def _bake_fluid_domain(obj) -> None:
-    # Free any stale/existing bake first — fluid.bake_all on an already-baked domain ships the OLD cache
-    # (the same frozen-stale failure fixed for point caches); free_all forces a clean re-bake.
-    with bpy.context.temp_override(active_object=obj, selected_objects=[obj], object=obj):
-        try:
-            bpy.ops.fluid.free_all()
-        except Exception:
-            pass
-        bpy.ops.fluid.bake_all()
+def _free_fluid_domains(domains) -> None:
+    # Free any stale/existing bake first — a domain that arrives already-baked would otherwise ship the OLD
+    # cache; free_all forces a clean re-simulation (no-op when unbaked). free_all is NOT modal, so it is
+    # safe to call from this operator (unlike the modal fluid.bake_all).
+    for obj, _domain, _is_liquid in domains:
+        with bpy.context.temp_override(active_object=obj, selected_objects=[obj], object=obj):
+            try:
+                bpy.ops.fluid.free_all()
+            except Exception:
+                pass
+
+
+def _step_fluid_frames(first_frame: int, last_frame: int) -> None:
+    # Compute the fluid cache by STEPPING the timeline under cache_type='REPLAY'. bpy.ops.fluid.bake_all()
+    # is a MODAL operator: driven from this addon's modal-operator timer it either no-ops (writes nothing)
+    # or crashes Blender (a modal operator inside a modal operator). Stepping frame_set() runs the solver on
+    # each frame's depsgraph evaluation and persists that frame to disk — the reliable, non-modal recipe
+    # (mirrors the controller's Render.BakeSimulation).
+    scene = bpy.context.scene
+    for frame in range(first_frame, last_frame + 1):
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+
+
+def _fluid_frame_chunks(first_frame: int, last_frame: int, max_chunks: int = 12):
+    # Split the bake range into a few contiguous chunks so the modal operator regains control between them
+    # (panel progress + Esc-to-cancel), while each chunk still steps forward so REPLAY caches contiguously.
+    total = last_frame - first_frame + 1
+    if total <= 0:
+        return []
+    size = max(1, (total + max_chunks - 1) // max_chunks)
+    chunks = []
+    frame = first_frame
+    while frame <= last_frame:
+        chunks.append((frame, min(frame + size - 1, last_frame)))
+        frame += size
+    return chunks
 
 
 def _bake_point_caches() -> None:
@@ -1677,8 +1735,18 @@ def _local_bake_step_plan(scene, start_frame: int, end_frame: int):
             _save_mainfile()
 
         steps.append(("Configuring fluid domains", _configure_all_domains))
-        for obj, _domain, _is_liquid in domains:
-            steps.append((f"Baking fluid: {obj.name}", (lambda captured=obj: _bake_fluid_domain(captured))))
+        steps.append(("Preparing fluid bake", (lambda captured=domains: _free_fluid_domains(captured))))
+
+        # Bake covers the sim's natural start (contiguous liquid mesh) up to the render end — mirrors
+        # _configure_fluid_domain's cache_frame_start clamp. Step it in chunks (non-modal REPLAY bake).
+        bake_start = start_frame
+        for _obj, domain, _is_liquid in domains:
+            existing_start = int(getattr(domain, "cache_frame_start", 1) or 1)
+            bake_start = min(bake_start, max(1, min(existing_start, start_frame)))
+        bake_end = max(bake_start, end_frame)
+        for chunk_first, chunk_last in _fluid_frame_chunks(bake_start, bake_end):
+            steps.append((f"Simulating fluid (frames {chunk_first}-{chunk_last})",
+                          (lambda a=chunk_first, b=chunk_last: _step_fluid_frames(a, b))))
 
     if _scene_has_point_cache_sim(scene):
         steps.append(("Baking point-cache simulations (cloth/particles/soft body/…)", _bake_point_caches))
