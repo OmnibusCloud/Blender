@@ -322,6 +322,29 @@ def _planned_upload_attachments(state) -> list[dict[str, object]]:
     return list(collect_scene_attachment_metadata()) + _local_bake_fluid_attachments(state)
 
 
+def _fluid_cache_covers_frame(domain, frame: int) -> bool:
+    """True when the domain's on-disk cache holds DATA (.vdb / .bobj.gz) for the given frame — i.e. an
+    earlier bake covers the frame the current render needs. A cache baked to an earlier end frame reads
+    'baked' in the context-free scan yet cannot render a later frame; this is the range-aware check."""
+    if domain is None or frame <= 0:
+        return False
+    cache_dir = str(getattr(domain, "cache_directory", "") or "")
+    if not cache_dir:
+        return False
+    resolved = bpy.path.abspath(cache_dir)
+    if not resolved or not os.path.isdir(resolved):
+        return False
+    for _root, _dirs, files in os.walk(resolved):
+        for name in files:
+            low = name.lower()
+            if not (low.endswith(".vdb") or low.endswith(".bobj.gz")):
+                continue
+            frame_match = re.search(r"_(\d+)\.", name)
+            if frame_match and int(frame_match.group(1)) == frame:
+                return True
+    return False
+
+
 def _should_bake_locally_first(context) -> bool:
     """True when a Render launch must run a LOCAL bake first: the LOCAL strategy is selected, the local
     driver is available, the scene has an unbaked simulation, and we have not already locally baked THIS
@@ -337,7 +360,58 @@ def _should_bake_locally_first(context) -> bool:
     if _local_bake_is_current(state):
         return False
 
-    return bool(_scan_scene_simulations(context.scene).unbaked_kinds)
+    if _scan_scene_simulations(context.scene).unbaked_kinds:
+        return True
+
+    # Range-aware override: the scan is context-free, so a fluid cache baked earlier to a SHORTER range
+    # still reads 'baked' — but it cannot render the currently requested frame. Re-bake in that case.
+    _bake_start, bake_end = _local_bake_frame_range(context)
+    for _obj, domain, _is_liquid in _local_fluid_domains(context.scene):
+        if not _fluid_cache_covers_frame(domain, bake_end):
+            return True
+
+    return False
+
+
+def _try_readopt_local_bake(context) -> None:
+    """Re-adopt an existing on-disk local bake whose session manifest was lost (a Blender restart wipes
+    the window-manager state, but the REPLAY cache next to the .blend and the embedded point caches are
+    still valid). Re-uploads the fluid cache files and rebuilds the manifest exactly like the bake's
+    _finish, so the launch takes the plain Render* path instead of falling back to a farm re-bake.
+    Best-effort: any failure leaves the state untouched and the launch falls back to the delegated bake."""
+    from .bridge_dependency_policy import LOCAL_BAKE_AVAILABLE
+
+    state = _get_runtime_state(context)
+    if not LOCAL_BAKE_AVAILABLE:
+        return
+    if (getattr(state, "bake_strategy", "DELEGATED") or "DELEGATED").upper() != "LOCAL":
+        return
+    if _local_bake_is_current(state):
+        return
+
+    scene = context.scene
+    domains = _local_fluid_domains(scene)
+    if not domains:
+        return
+
+    bake_start, bake_end = _local_bake_frame_range(context)
+    for _obj, domain, _is_liquid in domains:
+        if not _fluid_cache_covers_frame(domain, bake_end):
+            return  # not covered — _should_bake_locally_first re-bakes instead
+
+    try:
+        client = _get_bridge_client(context)
+        fluid_attachments = _collect_local_fluid_cache_attachments(scene, client, bake_start, bake_end)
+        baked_path = bpy.data.filepath or ""
+        state.local_bake_fluid_manifest_json = json.dumps(fluid_attachments, ensure_ascii=False)
+        state.local_bake_source_path = baked_path
+        state.local_bake_source_mtime = _blend_file_mtime(baked_path)
+        state.status_message = f"Re-using the local bake on disk ({len(fluid_attachments)} fluid cache file(s) re-attached)."
+        _tag_job_areas_redraw()
+    except Exception as ex:
+        # Leave the state unset: the launch's should_local fallback delegates the bake instead.
+        state.last_error = str(ex)
+        state.status_message = f"Could not re-use the local bake on disk ({ex}); baking on the render farm instead."
 
 
 def _apply_dependency_plan(state, attachments: list[dict[str, object]]) -> None:
@@ -2337,6 +2411,11 @@ class OUTWIT_OT_bridge_launch_render(Operator):
         if _should_bake_locally_first(context):
             bpy.ops.outwit.bridge_bake_local("INVOKE_DEFAULT", chain_to_render=True)
             return {"FINISHED"}
+
+        # LOCAL strategy with a bake already ON DISK but no session manifest (e.g. after a Blender
+        # restart): re-attach the fluid caches so the launch keeps the plain Render* path instead of
+        # silently re-baking on the farm.
+        _try_readopt_local_bake(context)
 
         # Main-thread: validate the scene is saved and gather all bpy-derived data up front, so the
         # worker thread only does network/subprocess work (Blender's API is not thread-safe).
