@@ -365,10 +365,12 @@ def _should_bake_locally_first(context) -> bool:
 
     # Range-aware override: the scan is context-free, so a fluid cache baked earlier to a SHORTER range
     # still reads 'baked' — but it cannot render the currently requested frame. Re-bake in that case.
-    _bake_start, bake_end = _local_bake_frame_range(context)
-    for _obj, domain, _is_liquid in _local_fluid_domains(context.scene):
-        if not _fluid_cache_covers_frame(domain, bake_end):
-            return True
+    fluid_domains = _local_fluid_domains(context.scene)
+    if fluid_domains:
+        _bake_start, bake_end = _local_bake_frame_range(context)
+        for _obj, domain, _is_liquid in fluid_domains:
+            if not _fluid_cache_covers_frame(domain, bake_end):
+                return True
 
     return False
 
@@ -376,9 +378,10 @@ def _should_bake_locally_first(context) -> bool:
 def _try_readopt_local_bake(context) -> None:
     """Re-adopt an existing on-disk local bake whose session manifest was lost (a Blender restart wipes
     the window-manager state, but the REPLAY cache next to the .blend and the embedded point caches are
-    still valid). Re-uploads the fluid cache files and rebuilds the manifest exactly like the bake's
-    _finish, so the launch takes the plain Render* path instead of falling back to a farm re-bake.
-    Best-effort: any failure leaves the state untouched and the launch falls back to the delegated bake."""
+    still valid). Enumerate-ONLY: rebuilds the manifest with LocalPath entries; the launch's background
+    upload worker uploads the files with the scene, and the launch keeps the plain Render* path instead
+    of falling back to a farm re-bake. Best-effort: any failure leaves the state untouched and the launch
+    falls back to the delegated bake."""
     from .bridge_dependency_policy import LOCAL_BAKE_AVAILABLE
 
     state = _get_runtime_state(context)
@@ -400,13 +403,12 @@ def _try_readopt_local_bake(context) -> None:
             return  # not covered — _should_bake_locally_first re-bakes instead
 
     try:
-        client = _get_bridge_client(context)
-        fluid_attachments = _collect_local_fluid_cache_attachments(scene, client, bake_start, bake_end)
+        fluid_attachments = _enumerate_local_fluid_cache_attachments(scene, bake_start, bake_end)
         baked_path = bpy.data.filepath or ""
         state.local_bake_fluid_manifest_json = json.dumps(fluid_attachments, ensure_ascii=False)
         state.local_bake_source_path = baked_path
         state.local_bake_source_mtime = _blend_file_mtime(baked_path)
-        state.status_message = f"Re-using the local bake on disk ({len(fluid_attachments)} fluid cache file(s) re-attached)."
+        state.status_message = f"Re-using the local bake on disk ({len(fluid_attachments)} fluid cache file(s) will upload with the scene)."
         _tag_job_areas_redraw()
     except Exception as ex:
         # Leave the state unset: the launch's should_local fallback delegates the bake instead.
@@ -429,14 +431,17 @@ def _upload_scene_attachments(client: BridgeClient, attachments: list[dict[str, 
     for attachment in attachments:
         current = dict(attachment)
         packaging_strategy = str(current.get("PackagingStrategy") or "")
-        # Skip entries that already carry a BlobId — locally-baked fluid caches are uploaded during the
-        # bake (their OriginalPath is the //-relative ref, not a readable source path), so re-uploading
-        # here would fail; they pass through unchanged.
+        # Entries that already carry a BlobId pass through unchanged (e.g. a fluid manifest re-used from a
+        # previous launch). Fresh entries upload from LocalPath when present (locally-baked fluid caches:
+        # their OriginalPath is the //-relative ref, not a readable source path) or from OriginalPath (the
+        # regular dependency entries, which resolve it absolute).
         if packaging_strategy == "SceneAttachmentBlob" and not str(current.get("BlobId") or ""):
-            source_path = str(current.get("OriginalPath") or "")
+            source_path = str(current.get("LocalPath") or "") or str(current.get("OriginalPath") or "")
             response = client.upload_file(source_path)
             current["BlobId"] = response.blob_id
 
+        # LocalPath is upload-plumbing, not part of the scene-ref manifest contract — strip it.
+        current.pop("LocalPath", None)
         uploaded_attachments.append(current)
 
     return uploaded_attachments
@@ -840,6 +845,15 @@ def _apply_upload_result(state, blend_path: str, output_signature: str, result: 
         "Upload completed." if response.uploaded else "Upload did not complete."
     )
 
+    # Write the now-uploaded FluidCache entries (BlobIds filled by the worker) back into the local-bake
+    # manifest, so subsequent launches of this same baked file reuse the blobs instead of re-uploading
+    # the whole cache each time.
+    if _local_bake_is_current(state):
+        from .bridge_local_bake import FLUID_CACHE_KIND
+        uploaded_fluid = [a for a in result["attachments"] if str(a.get("Kind") or "") == FLUID_CACHE_KIND]
+        if uploaded_fluid:
+            state.local_bake_fluid_manifest_json = json.dumps(uploaded_fluid, ensure_ascii=False)
+
 
 def _get_still_frame(context) -> int:
     scene = context.scene
@@ -851,7 +865,11 @@ def _apply_job_response(state, response, script_name: str) -> None:
     state.active_job_id = response.job_id
     state.active_job_script_name = script_name
     state.active_job_status = "Submitted"
-    state.active_job_progress = "Starting..."
+    # A delegated bake runs the WHOLE simulation as one task on one node before any frame renders, and
+    # per-frame progress is not reported for it (engine limitation) — say so, or a heavy sim looks hung.
+    state.active_job_progress = (
+        "Baking simulation on the farm (single node; no frame progress until the bake finishes)..."
+        if script_name.startswith("BakeAndRender") else "Starting...")
     state.active_job_progress_factor = 0.0
     state.active_job_distributed_progress = ""
     state.active_job_distributed_progress_factor = 0.0
@@ -1836,13 +1854,17 @@ def _local_bake_step_plan(scene, start_frame: int, end_frame: int):
     return steps
 
 
-def _collect_local_fluid_cache_attachments(scene, client, start_frame: int, end_frame: int) -> list[dict[str, object]]:
-    """Upload the baked fluid cache files within the render range and build their FluidCache attachment
+def _enumerate_local_fluid_cache_attachments(scene, start_frame: int, end_frame: int) -> list[dict[str, object]]:
+    """Enumerate the baked fluid cache files within the render range and build their FluidCache attachment
     entries (frame-tagged exactly like the controller — gas density per-frame, liquid/noise/config whole).
     Per-frame gas-density caches OUTSIDE [start_frame, end_frame] are skipped (the bake covers the sim's
     natural start for a contiguous liquid cache, but those early frames never render — mirrors the
     controller's WitActivityAdapterRenderBakeSimulation filter). Point-cache + GN bakes are self-contained
-    in the saved .blend and need no attachments."""
+    in the saved .blend and need no attachments.
+
+    Enumerate-ONLY (fast, main-thread safe): entries carry LocalPath and an empty BlobId; the launch's
+    background upload worker uploads them with the scene (_upload_scene_attachments). Uploading here —
+    on the UI thread — froze Blender for minutes on a large liquid cache."""
     from .bridge_local_bake import build_fluid_cache_attachment, fluid_cache_frame
 
     blend_dir = os.path.dirname(bpy.data.filepath or "")
@@ -1870,8 +1892,9 @@ def _collect_local_fluid_cache_attachments(scene, client, start_frame: int, end_
                 if frame is not None and (frame < start_frame or frame > end_frame):
                     continue
 
-                response = client.upload_file(full)
-                attachments.append(build_fluid_cache_attachment(rel, is_liquid, response.blob_id))
+                entry = build_fluid_cache_attachment(rel, is_liquid)
+                entry["LocalPath"] = full
+                attachments.append(entry)
 
     return attachments
 
@@ -1960,18 +1983,10 @@ class OUTWIT_OT_bridge_bake_local(Operator):
         state = _get_runtime_state(context)
         self._cleanup(context)
 
-        fluid_attachments: list[dict[str, object]] = []
-        try:
-            client = _get_bridge_client(context)
-            fluid_attachments = _collect_local_fluid_cache_attachments(
-                context.scene, client, self._bake_start_frame, self._bake_end_frame)
-        except Exception as ex:
-            state.local_bake_in_progress = False
-            state.last_error = str(ex)
-            state.status_message = f"Baked, but collecting fluid caches failed: {ex}"
-            self.report({"ERROR"}, state.status_message)
-            _tag_job_areas_redraw()
-            return {"CANCELLED"}
+        # Enumerate-only (fast): the cache files upload in the LAUNCH's background worker together with
+        # the scene. Uploading here — on the UI thread — froze Blender for minutes on large liquid caches.
+        fluid_attachments = _enumerate_local_fluid_cache_attachments(
+            context.scene, self._bake_start_frame, self._bake_end_frame)
 
         baked_path = bpy.data.filepath or ""
         state.local_bake_fluid_manifest_json = json.dumps(fluid_attachments, ensure_ascii=False)
@@ -1979,7 +1994,7 @@ class OUTWIT_OT_bridge_bake_local(Operator):
         state.local_bake_source_mtime = _blend_file_mtime(baked_path)
         state.local_bake_in_progress = False
         _refresh_bridge_state(context)  # re-scan: the simulation now reads as baked
-        state.status_message = (f"Local bake complete ({len(fluid_attachments)} fluid cache file(s) collected)."
+        state.status_message = (f"Local bake complete ({len(fluid_attachments)} fluid cache file(s) will upload with the scene)."
                                 if fluid_attachments else "Local bake complete.")
         self.report({"INFO"}, state.status_message)
         _tag_job_areas_redraw()
