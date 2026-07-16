@@ -46,8 +46,9 @@ bridge binary is code-signed on every platform — macOS (Developer ID, notarize
   it through the bridge off the UI thread; the server splits the work and dispatches it
   across the selected machines.
 - **Progress** — live progress and **Cancel** right in the panel.
-- **Results** — frames or video download back through the bridge; open the folder or
-  load the result straight into Blender.
+- **Results** — frames or video stream back through the bridge in the background with a
+  live progress bar (large results never time out); open the folder or load the result
+  straight into Blender.
 
 ---
 
@@ -141,8 +142,9 @@ bake runs. An unbaked simulation is never sent to a plain render.
 - Live distributed progress; a confirmation prompt guards very large frame batches.
 - **Cancel** propagates to the assigned machines and interrupts the distributed batch.
 - **Reset** recovers from any error state without restarting Blender.
-- Results download through the bridge: open the file, open the folder, or load the
-  image straight into Blender.
+- Results download through the bridge as a background transfer — chunked streaming with a
+  progress bar and its own **Cancel**, so a multi-hundred-MB video arrives reliably even on
+  a slow connection: open the file, open the folder, or load the image straight into Blender.
 
 ### Reliability
 
@@ -155,6 +157,9 @@ bake runs. An unbaked simulation is never sent to a plain render.
   backend before falling back to CPU (and goes straight to CPU on an out-of-memory failure);
   a node remembers what worked so it doesn't re-try a bad backend every frame. One flaky GPU
   slows a node down at worst — it doesn't fail the job.
+- **Timeout-proof transfers** — scene uploads and result downloads run as background
+  transfers on the bridge, polled with quick status calls: no single request ever spans a
+  multi-minute push or pull, so file size and connection speed can't trip a client timeout.
 
 ### Panel & settings
 
