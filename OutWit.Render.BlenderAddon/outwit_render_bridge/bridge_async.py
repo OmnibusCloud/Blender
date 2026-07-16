@@ -15,6 +15,9 @@ from .bridge_client import BridgeClient
 # Job statuses that mean "no more progress will come".
 TERMINAL_STATUSES = {"Completed", "Failed", "Cancelled"}
 
+# Download statuses that mean "the transfer is over" (see DownloadStatusResponse on the bridge).
+DOWNLOAD_TERMINAL_STATUSES = {"Completed", "Failed", "Cancelled", "NotFound"}
+
 
 class AsyncCall:
     """Runs a 0-arg callable on a daemon thread.
@@ -120,6 +123,80 @@ class JobMonitor:
     @property
     def stopped(self) -> bool:
         return self._stop.is_set()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+class DownloadMonitor:
+    """Background start+poll driver for one result download.
+
+    Starts the bridge's background transfer off the main thread, then polls its status at a fixed
+    interval into a thread-safe slot (mirrors :class:`JobMonitor`). The UI timer reads
+    :pymeth:`snapshot` and applies it on the main thread. Stops itself once the transfer reaches a
+    terminal status, or after too many consecutive poll failures (the bridge is local — if it stops
+    answering, waiting longer won't help).
+    """
+
+    MAX_CONSECUTIVE_POLL_FAILURES = 8
+
+    def __init__(self, context_directory: str, job_id: str, interval_seconds: float = 0.5, client: Optional[BridgeClient] = None):
+        self._client = client or BridgeClient(context_directory)
+        self._job_id = job_id
+        self._interval = max(0.1, float(interval_seconds))
+        self._lock = threading.Lock()
+        self._latest: Any = None
+        self._error: Optional[BaseException] = None
+        self._terminal = False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> "DownloadMonitor":
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        try:
+            self._store(self._client.start_download_result(self._job_id))
+        except BaseException as ex:  # noqa: BLE001 - surfaced via snapshot()
+            with self._lock:
+                self._error = ex
+                self._terminal = True
+            return
+
+        failures = 0
+        while not self._stop.is_set():
+            with self._lock:
+                if self._terminal:
+                    break
+            self._stop.wait(self._interval)
+            if self._stop.is_set():
+                break
+            try:
+                self._store(self._client.get_download_result_status(self._job_id))
+                failures = 0
+            except BaseException as ex:  # noqa: BLE001 - surfaced via snapshot()
+                failures += 1
+                with self._lock:
+                    self._error = ex
+                    if failures >= self.MAX_CONSECUTIVE_POLL_FAILURES:
+                        self._terminal = True
+
+    def _store(self, status: Any) -> None:
+        with self._lock:
+            self._latest = status
+            self._error = None
+            if str(getattr(status, "status", "")) in DOWNLOAD_TERMINAL_STATUSES:
+                self._terminal = True
+
+    def snapshot(self) -> tuple[Any, Optional[BaseException], bool]:
+        """Returns (latest DownloadStatusResponse|None, last error|None, reached_terminal)."""
+        with self._lock:
+            return self._latest, self._error, self._terminal
+
+    @property
+    def job_id(self) -> str:
+        return self._job_id
 
     def stop(self) -> None:
         self._stop.set()

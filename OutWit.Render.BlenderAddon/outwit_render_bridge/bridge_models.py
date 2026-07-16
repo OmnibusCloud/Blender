@@ -284,6 +284,31 @@ class UploadBlendResponse:
 
 
 @dataclass(slots=True)
+class UploadStatusResponse:
+    """Status snapshot of a background upload (start once, then poll)."""
+
+    transfer_id: str = ""
+    status: str = ""
+    file_name: str = ""
+    total_bytes: int = 0
+    result: UploadBlendResponse | None = None
+    error: str | None = None
+
+    @staticmethod
+    def from_json(data: dict[str, Any] | str) -> "UploadStatusResponse":
+        data = _ensure_mapping(data)
+        result_raw = _get_value(data, "Result")
+        return UploadStatusResponse(
+            transfer_id=str(_get_value(data, "TransferId") or ""),
+            status=str(_get_value(data, "Status") or ""),
+            file_name=str(_get_value(data, "FileName") or ""),
+            total_bytes=int(_get_value(data, "TotalBytes") or 0),
+            result=UploadBlendResponse.from_json(result_raw) if result_raw else None,
+            error=_get_value(data, "Error"),
+        )
+
+
+@dataclass(slots=True)
 class RenderValidateBlendResponse:
     job_id: str = ""
     completed: bool = False
@@ -492,4 +517,37 @@ class DownloadResultResponse:
             file_size=int(_get_value(data, "FileSize") or 0),
             items=[DownloadedResultItemResponse.from_json(me) for me in _get_value(data, "Items") or []],
             message=_get_value(data, "Message"),
+        )
+
+
+@dataclass(slots=True)
+class DownloadStatusResponse:
+    """Progress snapshot of a background result download (start once, then poll)."""
+
+    job_id: str = ""
+    status: str = ""
+    total_bytes: int = 0
+    downloaded_bytes: int = 0
+    progress: float = 0.0
+    item_count: int = 0
+    items_completed: int = 0
+    current_file_name: str = ""
+    result: DownloadResultResponse | None = None
+    error: str | None = None
+
+    @staticmethod
+    def from_json(data: dict[str, Any] | str) -> "DownloadStatusResponse":
+        data = _ensure_mapping(data)
+        result_raw = _get_value(data, "Result")
+        return DownloadStatusResponse(
+            job_id=str(_get_value(data, "JobId") or ""),
+            status=str(_get_value(data, "Status") or ""),
+            total_bytes=int(_get_value(data, "TotalBytes") or 0),
+            downloaded_bytes=int(_get_value(data, "DownloadedBytes") or 0),
+            progress=float(_get_value(data, "Progress") or 0.0),
+            item_count=int(_get_value(data, "ItemCount") or 0),
+            items_completed=int(_get_value(data, "ItemsCompleted") or 0),
+            current_file_name=str(_get_value(data, "CurrentFileName") or ""),
+            result=DownloadResultResponse.from_json(result_raw) if result_raw else None,
+            error=_get_value(data, "Error"),
         )

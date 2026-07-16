@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,6 +13,7 @@ from .bridge_models import (
     BeginSignInResponse,
     BridgeStatusResponse,
     DownloadResultResponse,
+    DownloadStatusResponse,
     ExecutionScopeOptionsResponse,
     GetJobResponse,
     RenderPreflightResponse,
@@ -20,6 +22,7 @@ from .bridge_models import (
     RunRenderResponse,
     SessionStateResponse,
     UploadBlendResponse,
+    UploadStatusResponse,
 )
 
 TResponse = TypeVar("TResponse")
@@ -74,11 +77,43 @@ class BridgeClient:
     def release_lease(self, lease_id: str) -> bool:
         return self._post("ReleaseLeaseAsync", lambda data: bool(data), lease_id)
 
+    # Uploads run as background transfers on the bridge (start once, then poll): a large packed
+    # scene or cache takes minutes to push to the cloud — far past the per-request timeout — so no
+    # single REST call may span the whole upload. These keep the old blocking signature (callers
+    # already run them on worker threads); the polling happens inside.
     def upload_blend(self, file_path: str) -> UploadBlendResponse:
-        return self._post("UploadBlendAsync", UploadBlendResponse.from_json, file_path)
+        return self._run_upload("StartUploadBlendAsync", file_path)
 
     def upload_file(self, file_path: str) -> UploadBlendResponse:
-        return self._post("UploadFileAsync", UploadBlendResponse.from_json, file_path)
+        return self._run_upload("StartUploadFileAsync", file_path)
+
+    def start_upload_blend(self, file_path: str) -> UploadStatusResponse:
+        return self._post("StartUploadBlendAsync", UploadStatusResponse.from_json, file_path)
+
+    def start_upload_file(self, file_path: str) -> UploadStatusResponse:
+        return self._post("StartUploadFileAsync", UploadStatusResponse.from_json, file_path)
+
+    def get_upload_status(self, transfer_id: str) -> UploadStatusResponse:
+        return self._post("GetUploadStatusAsync", UploadStatusResponse.from_json, transfer_id)
+
+    def cancel_upload(self, transfer_id: str) -> bool:
+        return self._post("CancelUploadAsync", lambda data: bool(data), transfer_id)
+
+    def _run_upload(self, start_method: str, file_path: str) -> UploadBlendResponse:
+        status = self._post(start_method, UploadStatusResponse.from_json, file_path)
+
+        # Ramping poll: small files (cache frames upload in bulk) finish within the first quick
+        # polls, while a multi-hundred-MB scene settles into a relaxed 0.5s cadence.
+        delay = 0.05
+        while status.status == "InProgress":
+            time.sleep(delay)
+            delay = min(delay * 2, 0.5)
+            status = self.get_upload_status(status.transfer_id)
+
+        if status.status == "Completed" and status.result is not None:
+            return status.result
+
+        raise BridgeClientError(status.error or f"Upload did not complete (status: {status.status or 'unknown'}).")
 
     def run_render_validate_blend(self, scene_blob_id: str, attached_files: list[dict[str, Any]] | None = None) -> RenderValidateBlendResponse:
         return self._post("RunRenderValidateBlendAsync", RenderValidateBlendResponse.from_json, scene_blob_id, attached_files or [])
@@ -213,6 +248,18 @@ class BridgeClient:
 
     def download_result(self, job_id: str) -> DownloadResultResponse:
         return self._post("DownloadResultAsync", DownloadResultResponse.from_json, job_id)
+
+    # Large results (video, frame archives) take minutes to pull from the cloud — far past any sane
+    # per-request timeout. The bridge downloads them in a background transfer: start once, then poll
+    # the status; every REST round-trip here stays fast.
+    def start_download_result(self, job_id: str) -> DownloadStatusResponse:
+        return self._post("StartDownloadResultAsync", DownloadStatusResponse.from_json, job_id)
+
+    def get_download_result_status(self, job_id: str) -> DownloadStatusResponse:
+        return self._post("GetDownloadResultStatusAsync", DownloadStatusResponse.from_json, job_id)
+
+    def cancel_download_result(self, job_id: str) -> bool:
+        return self._post("CancelDownloadResultAsync", lambda data: bool(data), job_id)
 
     def get_render_settings(self) -> RenderSettingsResponse:
         return self._get("GetRenderSettingsAsync", RenderSettingsResponse.from_json)

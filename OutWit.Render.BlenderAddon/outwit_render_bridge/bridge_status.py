@@ -244,6 +244,16 @@ def target_label(state) -> str:
     return "—"
 
 
+def format_bytes(byte_count: int) -> str:
+    """Human-readable size for progress text: 512 B, 4.2 MB, 1.3 GB."""
+    size = float(max(0, int(byte_count)))
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024.0:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} TB"
+
+
 # endregion
 
 
