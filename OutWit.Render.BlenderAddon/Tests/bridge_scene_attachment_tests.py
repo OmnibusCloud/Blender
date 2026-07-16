@@ -144,6 +144,122 @@ class BridgeSceneAttachmentTests(unittest.TestCase):
             self.assertEqual("VseMovieStrip", attachments[1]["Kind"])
             self.assertEqual("VseSoundStrip", attachments[2]["Kind"])
 
+    def test_collect_missing_file_dependencies_flags_unpacked_image_whose_source_is_absent(self) -> None:
+        # The race_spaceship case: an unpacked image whose stored path climbs out to the original
+        # author's machine — nothing to upload, nothing to render with.
+        fake_bpy = self._create_fake_bpy(
+            images=[
+                types.SimpleNamespace(
+                    name="fx3_Panels_Bump2.jpg",
+                    source="FILE",
+                    packed_file=None,
+                    filepath="C:/blend-dir/../../../Users/ganimede/Desktop/fx3_Panels_Bump2.jpg",
+                )
+            ]
+        )
+
+        module = self._load_module(fake_bpy)
+        missing = module.collect_missing_file_dependencies()
+
+        self.assertEqual(1, len(missing))
+        self.assertEqual("ImageAsset", missing[0]["Kind"])
+        self.assertEqual("fx3_Panels_Bump2.jpg", missing[0]["Name"])
+        # normpath collapses the ../.. chain into the artist-readable original location.
+        self.assertIn("ganimede", missing[0]["ResolvedPath"])
+        self.assertTrue(missing[0]["ResolvedPath"].endswith("fx3_Panels_Bump2.jpg"))
+
+    def test_collect_missing_file_dependencies_ignores_packed_image_with_stale_path(self) -> None:
+        # Packed pixels live inside the .blend — a stale filepath is harmless and must not block.
+        fake_bpy = self._create_fake_bpy(
+            images=[
+                types.SimpleNamespace(
+                    name="00-1.jpg",
+                    source="FILE",
+                    packed_file=object(),
+                    filepath="//textures/00-1.jpg",
+                )
+            ]
+        )
+
+        module = self._load_module(fake_bpy)
+
+        self.assertEqual([], module.collect_missing_file_dependencies())
+
+    def test_collect_missing_file_dependencies_ignores_files_that_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_directory:
+            texture_path = pathlib.Path(temp_directory) / "texture.png"
+            texture_path.write_text("pixels")
+            fake_bpy = self._create_fake_bpy(
+                images=[types.SimpleNamespace(name="texture.png", source="FILE", packed_file=None, filepath=str(texture_path))]
+            )
+
+            module = self._load_module(fake_bpy)
+
+            self.assertEqual([], module.collect_missing_file_dependencies())
+
+    def test_collect_missing_file_dependencies_flags_missing_library_cache_and_volume(self) -> None:
+        fake_bpy = self._create_fake_bpy(
+            libraries=[types.SimpleNamespace(name="furniture.blend", packed_file=None, filepath="//libs/furniture.blend")],
+            cache_files=[types.SimpleNamespace(name="sim.abc", filepath="//caches/sim.abc")],
+            volumes=[types.SimpleNamespace(name="smoke", filepath="//vdb/smoke.vdb")],
+        )
+
+        module = self._load_module(fake_bpy)
+        missing = module.collect_missing_file_dependencies()
+
+        self.assertEqual(["LinkedLibrary", "CacheFile", "Volume"], [me["Kind"] for me in missing])
+
+    def test_collect_missing_file_dependencies_race_spaceship_scenario(self) -> None:
+        # Regression pin for the real-world report: every texture packed except one, whose source
+        # lives on the author's desktop. Exactly that one must be flagged.
+        packed = [
+            types.SimpleNamespace(name=name, source="FILE", packed_file=object(), filepath=f"//textures/{name}")
+            for name in ("00-1.jpg", "15dbf56a.jpg", "post-4216.jpg")
+        ]
+        unpacked_missing = types.SimpleNamespace(
+            name="fx3_Panels_Bump2.jpg",
+            source="FILE",
+            packed_file=None,
+            filepath="//../../../../../Users/ganimede/Desktop/fx3_Panels_Bump2.jpg",
+        )
+        fake_bpy = self._create_fake_bpy(images=packed + [unpacked_missing])
+
+        module = self._load_module(fake_bpy)
+        missing = module.collect_missing_file_dependencies()
+
+        self.assertEqual(1, len(missing))
+        self.assertEqual("fx3_Panels_Bump2.jpg", missing[0]["Name"])
+
+    def test_format_missing_dependency_issue_is_empty_for_no_missing_entries(self) -> None:
+        module = self._load_module(self._create_fake_bpy())
+
+        self.assertEqual("", module.format_missing_dependency_issue([]))
+
+    def test_format_missing_dependency_issue_describes_single_entry_with_path_and_fix_hint(self) -> None:
+        module = self._load_module(self._create_fake_bpy())
+
+        message = module.format_missing_dependency_issue([
+            {"Kind": "ImageAsset", "Name": "fx3_Panels_Bump2.jpg", "RawPath": "//../fx3.jpg", "ResolvedPath": "C:/Users/ganimede/Desktop/fx3_Panels_Bump2.jpg"},
+        ])
+
+        self.assertIn("image 'fx3_Panels_Bump2.jpg'", message)
+        self.assertIn("C:/Users/ganimede/Desktop/fx3_Panels_Bump2.jpg", message)
+        self.assertIn("Pack Resources", message)
+
+    def test_format_missing_dependency_issue_summarizes_additional_entries(self) -> None:
+        module = self._load_module(self._create_fake_bpy())
+
+        message = module.format_missing_dependency_issue([
+            {"Kind": "ImageAsset", "Name": "a.jpg", "RawPath": "//a.jpg", "ResolvedPath": "C:/missing/a.jpg"},
+            {"Kind": "LinkedLibrary", "Name": "lib.blend", "RawPath": "//lib.blend", "ResolvedPath": "C:/missing/lib.blend"},
+            {"Kind": "Volume", "Name": "smoke", "RawPath": "//smoke.vdb", "ResolvedPath": "C:/missing/smoke.vdb"},
+        ])
+
+        self.assertIn("image 'a.jpg'", message)
+        self.assertIn("Also missing:", message)
+        self.assertIn("linked library 'lib.blend'", message)
+        self.assertIn("volume file 'smoke'", message)
+
     @staticmethod
     def _create_fake_bpy(*, images: list[object] | None = None, fonts: list[object] | None = None, cache_files: list[object] | None = None, libraries: list[object] | None = None, volumes: list[object] | None = None, sounds: list[object] | None = None, movieclips: list[object] | None = None, scenes: list[object] | None = None):
         return types.SimpleNamespace(

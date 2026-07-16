@@ -592,10 +592,20 @@ def _draw_job_results(layout, context, state, view) -> None:
         if state.download_primary_file_name:
             layout.label(text=state.download_primary_file_name, icon="IMAGE_DATA")
 
-        download = layout.row()
-        download.scale_y = 1.3
-        download.enabled = _has_active_job(state)
-        download.operator("outwit.bridge_download_result", text="Download result", icon="IMPORT")
+        if state.download_in_progress:
+            # Large results stream in the background — show the transfer instead of the button.
+            layout.progress(
+                factor=state.download_progress_factor,
+                text=f"Downloading: {state.download_progress}" if state.download_progress else "Downloading...",
+                type="BAR",
+            )
+            cancel_download = layout.row()
+            cancel_download.operator("outwit.bridge_cancel_download", text="Cancel download", icon="CANCEL")
+        else:
+            download = layout.row()
+            download.scale_y = 1.3
+            download.enabled = _has_active_job(state)
+            download.operator("outwit.bridge_download_result", text="Download result", icon="IMPORT")
 
         open_actions = layout.row(align=True)
         open_actions.enabled = _has_downloaded_result(state)
@@ -610,6 +620,7 @@ def _draw_job_results(layout, context, state, view) -> None:
             layout.label(text=state.download_message)
 
     again = layout.row()
+    again.enabled = not state.download_in_progress
     again.operator("outwit.bridge_reset_job", text="Render again", icon="LOOP_BACK")
 
 

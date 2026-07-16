@@ -10,7 +10,7 @@ import bpy
 from bpy.props import BoolProperty, StringProperty
 from bpy.types import Operator
 
-from .bridge_async import AsyncCall, JobMonitor, TERMINAL_STATUSES
+from .bridge_async import AsyncCall, DownloadMonitor, JobMonitor, TERMINAL_STATUSES
 from .bridge_client import BridgeClient, BridgeClientError
 from .bridge_context import load_latest_context, try_load_latest_context
 from .bridge_dependency_policy import (
@@ -50,9 +50,15 @@ from .bridge_render_settings import (
     resolve_target_seed,
     seed_prop_values,
 )
-from .bridge_scene_attachments import collect_scene_attachment_metadata, summarize_scene_attachment_metadata
+from .bridge_scene_attachments import (
+    collect_missing_file_dependencies,
+    collect_scene_attachment_metadata,
+    format_missing_dependency_issue,
+    summarize_scene_attachment_metadata,
+)
 from .bridge_scene_packaging import create_packed_upload_copy, scene_output_signature, ScenePackagingError
 from .bridge_state import ALL_CLIENTS_GROUP_ID, NO_GROUP_ID, apply_render_mode_to_axes
+from .bridge_status import format_bytes
 
 FORMAT_PNG = 0
 FORMAT_EXR = 1
@@ -777,9 +783,21 @@ def _scene_requires_upload(state, blend_path: str, output_signature: str) -> boo
     )
 
 
+def _missing_file_dependency_issue() -> str:
+    """Main-thread bpy scan: one readable sentence when the scene references files that do not
+    exist on this machine (empty when all good). Catching this BEFORE any bake/upload turns the
+    cloud validator's cryptic server-temp-path rejection into an actionable local error."""
+    return format_missing_dependency_issue(collect_missing_file_dependencies())
+
+
 def _upload_current_blend(context):
     state = _get_runtime_state(context)
     client = _get_bridge_client(context)
+
+    missing_issue = _missing_file_dependency_issue()
+    if missing_issue:
+        raise BridgeClientError(missing_issue)
+
     blend_path = _get_current_blend_path()
     output_signature = scene_output_signature(context.scene)
     planned_attachments = _planned_upload_attachments(state)
@@ -2420,6 +2438,17 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             self.report({"WARNING"}, "A launch is already in progress.")
             return {"CANCELLED"}
 
+        # A file the scene references but that is absent on THIS machine can never be attached —
+        # the cloud validator would reject the job after the upload anyway (with a server-side
+        # temp path in the message). Fail before any bake or upload, with the local path.
+        missing_issue = _missing_file_dependency_issue()
+        if missing_issue:
+            state.last_error = missing_issue
+            state.status_message = "Scene has missing file dependencies."
+            self.report({"ERROR"}, missing_issue)
+            _tag_job_areas_redraw()
+            return {"CANCELLED"}
+
         # LOCAL strategy with an unbaked simulation: bake it in this Blender FIRST, then the bake operator
         # re-invokes this launch (the scene now reads as baked → plain Render* with the collected fluid
         # caches). The path+mtime guard in _should_bake_locally_first stops this from looping.
@@ -2730,6 +2759,9 @@ class OUTWIT_OT_bridge_reset_job(Operator):
         state.download_primary_path = ""
         state.download_primary_file_name = ""
         state.download_item_count = 0
+        state.download_in_progress = False
+        state.download_progress = ""
+        state.download_progress_factor = 0.0
 
         _reset_preflight_state(state)
         state.last_error = ""
@@ -2739,31 +2771,145 @@ class OUTWIT_OT_bridge_reset_job(Operator):
         return {"FINISHED"}
 
 
+def _apply_download_progress(state, snapshot) -> None:
+    """Main-thread only: mirror a DownloadStatusResponse snapshot into the panel's progress fields."""
+    state.download_progress_factor = max(0.0, min(1.0, float(snapshot.progress)))
+    if snapshot.total_bytes > 0:
+        text = f"{format_bytes(snapshot.downloaded_bytes)} / {format_bytes(snapshot.total_bytes)}"
+        if snapshot.item_count > 1:
+            text += f" ({min(snapshot.items_completed + 1, snapshot.item_count)}/{snapshot.item_count})"
+        state.download_progress = text
+    else:
+        state.download_progress = "Preparing..."
+
+
 class OUTWIT_OT_bridge_download_result(Operator):
+    """Streams the job result to disk via the bridge's background transfer. A large video is
+    hundreds of MB — a single blocking REST call both froze the UI and hit the client timeout, so
+    the operator starts the transfer and polls its status from a modal timer instead."""
+
     bl_idname = "outwit.bridge_download_result"
     bl_label = "Download Result"
-    bl_description = "Download the final result of the current bridge job"
+    bl_description = "Download the final result of the current bridge job (streams in the background)"
+
+    _monitor = None
+    _timer = None
+
+    def execute(self, context):
+        state = _get_runtime_state(context)
+
+        if not state.active_job_id:
+            message = "No active bridge job is selected. Launch and refresh a job first."
+            state.last_error = message
+            state.status_message = "Result download failed."
+            self.report({"ERROR"}, message)
+            return {"CANCELLED"}
+
+        if state.download_in_progress:
+            self.report({"WARNING"}, "A result download is already in progress.")
+            return {"CANCELLED"}
+
+        try:
+            context_directory = _get_context_directory(context)
+        except Exception as ex:
+            state.last_error = str(ex)
+            state.status_message = "Result download failed."
+            self.report({"ERROR"}, str(ex))
+            return {"CANCELLED"}
+
+        state.download_in_progress = True
+        state.download_status = "Downloading"
+        state.download_message = ""
+        state.download_progress = ""
+        state.download_progress_factor = 0.0
+        state.last_error = ""
+        state.status_message = "Downloading result..."
+
+        self._monitor = DownloadMonitor(context_directory, state.active_job_id).start()
+        self._timer = context.window_manager.event_timer_add(0.25, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        _tag_job_areas_redraw()
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        state = _get_runtime_state(context)
+        snapshot, error, terminal = self._monitor.snapshot()
+
+        if snapshot is not None:
+            _apply_download_progress(state, snapshot)
+
+        if not terminal:
+            _tag_job_areas_redraw()
+            return {"PASS_THROUGH"}
+
+        self._cleanup(context)
+        return self._finish(state, snapshot, error)
+
+    def _cleanup(self, context):
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if self._monitor is not None:
+            self._monitor.stop()
+            self._monitor = None
+
+    def _finish(self, state, snapshot, error):
+        state.download_in_progress = False
+        state.download_progress = ""
+        state.download_progress_factor = 0.0
+
+        status = str(getattr(snapshot, "status", "")) if snapshot is not None else ""
+        result = getattr(snapshot, "result", None) if snapshot is not None else None
+
+        if status == "Completed" and result is not None:
+            state.download_status = "Downloaded"
+            state.download_message = result.message or ""
+            state.download_primary_path = result.local_path
+            state.download_primary_file_name = result.file_name
+            state.download_item_count = len(result.items)
+            state.status_message = "Result downloaded."
+            self.report({"INFO"}, result.message or result.file_name or "Result downloaded.")
+            _tag_job_areas_redraw()
+            return {"FINISHED"}
+
+        if status == "Cancelled":
+            state.download_status = "Cancelled"
+            state.download_message = ""
+            state.status_message = "Result download cancelled."
+            self.report({"INFO"}, "Result download cancelled.")
+            _tag_job_areas_redraw()
+            return {"CANCELLED"}
+
+        message = (getattr(snapshot, "error", None) if snapshot is not None else None) \
+            or (str(error) if error is not None else "") \
+            or "Result download failed."
+        state.download_status = "Failed"
+        state.download_message = ""
+        state.last_error = message
+        state.status_message = "Result download failed."
+        self.report({"ERROR"}, message)
+        _tag_job_areas_redraw()
+        return {"CANCELLED"}
+
+
+class OUTWIT_OT_bridge_cancel_download(Operator):
+    bl_idname = "outwit.bridge_cancel_download"
+    bl_label = "Cancel Download"
+    bl_description = "Cancel the result download in progress"
 
     def execute(self, context):
         state = _get_runtime_state(context)
         client = _get_bridge_client(context)
 
         try:
-            if not state.active_job_id:
-                raise BridgeClientError("No active bridge job is selected. Launch and refresh a job first.")
-
-            response = client.download_result(state.active_job_id)
-            state.download_status = "Downloaded" if response.downloaded else "Not downloaded"
-            state.download_message = response.message or ""
-            state.download_primary_path = response.local_path
-            state.download_primary_file_name = response.file_name
-            state.download_item_count = len(response.items)
-            state.status_message = "Result downloaded." if response.downloaded else "Result download failed."
-            self.report({"INFO"}, response.message or response.file_name or "Result downloaded.")
-            return {"FINISHED" if response.downloaded else "CANCELLED"}
+            client.cancel_download_result(state.active_job_id)
+            self.report({"INFO"}, "Download cancellation requested.")
+            return {"FINISHED"}
         except Exception as ex:
             state.last_error = str(ex)
-            state.status_message = "Result download failed."
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
 
@@ -2877,6 +3023,7 @@ CLASSES = (
     OUTWIT_OT_bridge_cancel_job,
     OUTWIT_OT_bridge_reset_job,
     OUTWIT_OT_bridge_download_result,
+    OUTWIT_OT_bridge_cancel_download,
     OUTWIT_OT_bridge_open_result,
     OUTWIT_OT_bridge_open_result_folder,
     OUTWIT_OT_bridge_load_result_image,

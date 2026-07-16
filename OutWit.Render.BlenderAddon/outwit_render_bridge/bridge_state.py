@@ -467,6 +467,9 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     download_primary_path: StringProperty(name="Download Primary Path", default="")
     download_primary_file_name: StringProperty(name="Download Primary File Name", default="")
     download_item_count: IntProperty(name="Download Item Count", default=0)
+    download_in_progress: BoolProperty(name="Download In Progress", default=False)
+    download_progress: StringProperty(name="Download Progress", default="")
+    download_progress_factor: FloatProperty(name="Download Progress Factor", default=0.0, min=0.0, max=1.0)
 
 
 CLASSES = (OutWitBridgeRuntimeState,)

@@ -183,6 +183,8 @@ def _load_bridge_operators_module():
 
     bridge_scene_attachments_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_scene_attachments")
     bridge_scene_attachments_module.collect_scene_attachment_metadata = lambda: []
+    bridge_scene_attachments_module.collect_missing_file_dependencies = lambda: []
+    bridge_scene_attachments_module.format_missing_dependency_issue = lambda missing: ""
     bridge_scene_attachments_module.summarize_scene_attachment_metadata = lambda attachments: {
         "TotalCount": len(attachments),
         "CountSummary": "",

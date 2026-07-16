@@ -22,6 +22,13 @@ KIND_DISPLAY_NAMES = {
     "VseSoundStrip": "VSE sound strips",
 }
 
+KIND_SINGULAR_NAMES = {
+    "CacheFile": "cache file",
+    "ImageAsset": "image",
+    "LinkedLibrary": "linked library",
+    "Volume": "volume file",
+}
+
 
 def _safe_relative_component(value: str) -> str:
     sanitized = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in value)
@@ -92,6 +99,88 @@ def summarize_scene_attachment_metadata(attachments: list[dict[str, object]]) ->
         "AttachmentCount": len(uploaded_attachments),
         "AttachmentSummary": _count_summary(uploaded_attachments),
     }
+
+
+def collect_missing_file_dependencies() -> list[dict[str, str]]:
+    """Dependencies the scene references but whose source files do NOT exist on this machine.
+
+    The attachment collector silently skips such entries (it cannot upload what is not there), so
+    without this scan the scene reaches the cloud unfixed and the validator rejects it with a
+    server-side temp path in the message — cryptic for the artist. Scanned kinds are exactly the
+    ones the cloud validator hard-blocks when absent (images, linked libraries, cache files,
+    volumes); fonts/sounds/movie clips are deliberately NOT scanned — Blender falls back for those
+    and the cloud does not block them, so flagging them here would over-block. Packed data needs
+    no external file and is never flagged.
+    """
+    missing: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def note(kind: str, name: str, raw_path: str) -> None:
+        raw = str(raw_path or "")
+        if not raw:
+            return
+
+        resolved = bpy.path.abspath(raw)
+        if resolved and os.path.exists(resolved):
+            return
+
+        key = (kind, resolved or raw)
+        if key in seen:
+            return
+
+        seen.add(key)
+        missing.append(
+            {
+                "Kind": kind,
+                "Name": str(name or ""),
+                "RawPath": raw,
+                "ResolvedPath": os.path.normpath(resolved) if resolved else raw,
+            }
+        )
+
+    for image in getattr(bpy.data, "images", []):
+        if getattr(image, "packed_file", None) is not None:
+            continue
+
+        if str(getattr(image, "source", "") or "") not in {"FILE", "SEQUENCE"}:
+            continue
+
+        note("ImageAsset", str(getattr(image, "name", "") or ""), str(getattr(image, "filepath", "") or ""))
+
+    for library in getattr(bpy.data, "libraries", []):
+        if getattr(library, "packed_file", None) is not None:
+            continue
+
+        note("LinkedLibrary", str(getattr(library, "name", "") or ""), str(getattr(library, "filepath", "") or ""))
+
+    for cache_file in getattr(bpy.data, "cache_files", []):
+        note("CacheFile", str(getattr(cache_file, "name", "") or ""), str(getattr(cache_file, "filepath", "") or ""))
+
+    for volume in getattr(bpy.data, "volumes", []):
+        note("Volume", str(getattr(volume, "name", "") or ""), str(getattr(volume, "filepath", "") or ""))
+
+    return missing
+
+
+def format_missing_dependency_issue(missing: list[dict[str, str]]) -> str:
+    """One artist-readable sentence for the launch gate; empty string when nothing is missing."""
+    if not missing:
+        return ""
+
+    def describe(entry: dict[str, str]) -> str:
+        kind = KIND_SINGULAR_NAMES.get(str(entry.get("Kind") or ""), "file")
+        name = str(entry.get("Name") or "") or os.path.basename(str(entry.get("ResolvedPath") or ""))
+        return f"{kind} '{name}'"
+
+    first = missing[0]
+    message = f"Missing on this computer: {describe(first)} expected at '{first.get('ResolvedPath')}'."
+    if len(missing) > 1:
+        others = ", ".join(describe(me) for me in missing[1:4])
+        suffix = ", …" if len(missing) > 4 else ""
+        message += f" Also missing: {others}{suffix}."
+
+    message += " Fix the path or pack the file into the .blend (File → External Data → Pack Resources), save, and try again."
+    return message
 
 
 def collect_scene_attachment_metadata() -> list[dict[str, object]]:
