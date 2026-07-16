@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -113,9 +115,12 @@ def ensure_bridge_running(context) -> None:
 
 def resolve_launch_target(context) -> tuple[Path, Path]:
     """Main-thread: resolve the bridge executable (reads addon preferences) + its session dir.
+    A BUNDLED executable is first STAGED to a per-user runtime directory outside the extension —
+    the bridge must never run from inside the extension package (see stage_bridge_runtime).
     Raises BridgeClientError when the binary cannot be located → the caller maps that to a
     BridgeMissing state with a Locate/Install action (no retry storm)."""
     executable_path = resolve_bridge_executable_path(context)
+    executable_path = stage_bridge_runtime(executable_path, Path(__file__).resolve().parent)
     return executable_path, executable_path.parent / "BridgeSession"
 
 
@@ -307,6 +312,116 @@ def resolve_bridge_executable_path(context) -> Path:
         "Bridge executable was not found. Configure Bridge Executable Path or bundle a bridge runtime in the addon package. "
         f"Searched:\n{searched}"
     )
+
+
+_STAGED_MARKER_NAME = ".outwit-staged"
+
+
+def get_bridge_staging_root() -> Path:
+    """Per-user directory the bundled bridge runtime is copied to before launching."""
+    if sys.platform.startswith("win"):
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "OmnibusCloud" / "BlenderBridgeRuntime"
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "OmnibusCloud" / "BlenderBridgeRuntime"
+
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "OmnibusCloud" / "BlenderBridgeRuntime"
+
+
+def read_addon_version(package_root: Path) -> str:
+    """Addon version from blender_manifest.toml — keys the staged runtime directory."""
+    try:
+        manifest = (package_root / "blender_manifest.toml").read_text(encoding="utf-8")
+    except OSError:
+        return "0.0.0"
+
+    match = re.search(r'^version\s*=\s*"([^"]+)"', manifest, re.MULTILINE)
+    return match.group(1) if match else "0.0.0"
+
+
+def stage_bridge_runtime(executable_path: Path, package_root: Path, staging_root: Path | None = None) -> Path:
+    """Copies the BUNDLED bridge runtime out of the extension package and returns the staged
+    executable; a path already outside the package (dev build, user-configured) is returned as-is.
+
+    The bridge must never run from inside the extension directory: Windows locks a running
+    executable's image and its process CWD, so Blender's extension update failed with "Failed to
+    remove or relocate existing directory" while a bridge was alive. The staged copy (keyed by
+    addon version, reused on later launches) keeps the extension directory free of locks; staged
+    runtimes of OTHER versions are removed best-effort once their bridge is gone."""
+    try:
+        is_bundled = executable_path.resolve().is_relative_to(package_root.resolve())
+    except OSError:
+        is_bundled = False
+
+    if not is_bundled:
+        return executable_path
+
+    root = staging_root if staging_root is not None else get_bridge_staging_root()
+    version = read_addon_version(package_root)
+    target_directory = root / version / get_runtime_identifier()
+    staged_executable = target_directory / executable_path.name
+    marker = target_directory / _STAGED_MARKER_NAME
+
+    if marker.exists() and staged_executable.exists():
+        _cleanup_stale_staged_versions(root, version)
+        return staged_executable
+
+    # Copy to a temp sibling, then rename into place — a crash mid-copy never leaves a
+    # half-staged directory that looks complete.
+    root.mkdir(parents=True, exist_ok=True)
+    temp_directory = root / f".tmp-{uuid.uuid4().hex[:12]}"
+    shutil.copytree(executable_path.parent, temp_directory)
+    (temp_directory / _STAGED_MARKER_NAME).write_text(version, encoding="utf-8")
+
+    target_directory.parent.mkdir(parents=True, exist_ok=True)
+    if target_directory.exists():
+        shutil.rmtree(target_directory, ignore_errors=True)
+
+    try:
+        temp_directory.rename(target_directory)
+    except OSError:
+        # Lost the race with another Blender instance staging the same version — use theirs.
+        shutil.rmtree(temp_directory, ignore_errors=True)
+        if not (marker.exists() and staged_executable.exists()):
+            raise
+
+    _cleanup_stale_staged_versions(root, version)
+    return staged_executable
+
+
+def _cleanup_stale_staged_versions(staging_root: Path, current_version: str) -> None:
+    """Best-effort removal of staged runtimes from OTHER addon versions and abandoned temp
+    copies. A version whose bridge is still running is left alone — it exits on its own once its
+    lease expires, and its files are locked anyway."""
+    try:
+        entries = list(staging_root.iterdir())
+    except OSError:
+        return
+
+    for entry in entries:
+        if entry.name == current_version or not entry.is_dir():
+            continue
+
+        if not entry.name.startswith(".tmp-") and _staged_version_has_live_bridge(entry):
+            continue
+
+        shutil.rmtree(entry, ignore_errors=True)
+
+
+def _staged_version_has_live_bridge(version_directory: Path) -> bool:
+    try:
+        session_directories = list(version_directory.glob("*/BridgeSession"))
+    except OSError:
+        return True
+
+    for session_directory in session_directories:
+        bridge_context, _ = try_load_latest_context(str(session_directory))
+        if bridge_context is not None and is_process_running(int(bridge_context.bridge_process_id or 0)):
+            return True
+
+    return False
 
 
 def build_bridge_command(executable_path: Path) -> list[str]:

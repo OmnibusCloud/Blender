@@ -160,6 +160,9 @@ bake runs. An unbaked simulation is never sent to a plain render.
 - **Timeout-proof transfers** — scene uploads and result downloads run as background
   transfers on the bridge, polled with quick status calls: no single request ever spans a
   multi-minute push or pull, so file size and connection speed can't trip a client timeout.
+- **Clean updates** — the bundled bridge is staged to a per-user runtime directory and never
+  runs from inside the extension folder, so updating the addon never fails on files locked
+  by a running bridge.
 
 ### Panel & settings
 
