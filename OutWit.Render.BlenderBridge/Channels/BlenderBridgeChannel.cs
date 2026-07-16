@@ -102,6 +102,26 @@ namespace OutWit.Render.BlenderBridge.Channels
             return BlobTransferService.UploadFileAsync(filePath);
         }
 
+        public Task<UploadStatusResponse> StartUploadBlendAsync(string filePath)
+        {
+            return BlobTransferService.StartUploadBlendAsync(filePath);
+        }
+
+        public Task<UploadStatusResponse> StartUploadFileAsync(string filePath)
+        {
+            return BlobTransferService.StartUploadFileAsync(filePath);
+        }
+
+        public Task<UploadStatusResponse> GetUploadStatusAsync(Guid transferId)
+        {
+            return BlobTransferService.GetUploadStatusAsync(transferId);
+        }
+
+        public Task<bool> CancelUploadAsync(Guid transferId)
+        {
+            return BlobTransferService.CancelUploadAsync(transferId);
+        }
+
         public Task<RenderValidateBlendResponse> RunRenderValidateBlendAsync(Guid sceneBlobId)
         {
             return RenderLaunchService.RunRenderValidateBlendAsync(sceneBlobId);
@@ -282,6 +302,21 @@ namespace OutWit.Render.BlenderBridge.Channels
         public Task<DownloadResultResponse> DownloadResultAsync(Guid jobId)
         {
             return DownloadService.DownloadResultAsync(jobId);
+        }
+
+        public Task<DownloadStatusResponse> StartDownloadResultAsync(Guid jobId)
+        {
+            return DownloadService.StartDownloadResultAsync(jobId);
+        }
+
+        public Task<DownloadStatusResponse> GetDownloadResultStatusAsync(Guid jobId)
+        {
+            return DownloadService.GetDownloadResultStatusAsync(jobId);
+        }
+
+        public Task<bool> CancelDownloadResultAsync(Guid jobId)
+        {
+            return DownloadService.CancelDownloadResultAsync(jobId);
         }
 
         public Task<RenderSettingsResponse> GetRenderSettingsAsync()

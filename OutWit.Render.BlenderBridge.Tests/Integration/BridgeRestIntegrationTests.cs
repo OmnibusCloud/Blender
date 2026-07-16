@@ -138,6 +138,111 @@ namespace OutWit.Render.BlenderBridge.Tests.Integration
         }
 
         [Test]
+        public async Task DownloadStatusEndpointsRespondThroughLocalRestBridgeTest()
+        {
+            var tempDir = CreateTempDirectory();
+            const string localRestUrl = "http://127.0.0.1:17793/bridge/";
+
+            try
+            {
+                await using var bridgeHost = new BridgeLocalHost("http://127.0.0.1:5701", localRestUrl, tempDir);
+                await bridgeHost.StartAsync();
+
+                using var http = new HttpClient();
+                var jobId = Guid.NewGuid();
+
+                var unknown = await SendPostAsync<DownloadStatusResponse>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.GetDownloadResultStatusAsync), jobId);
+                var cancelled = await SendPostAsync<bool>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.CancelDownloadResultAsync), jobId);
+
+                // Start with no cloud connection: the endpoint answers immediately and the background
+                // transfer fails on its own — the failure surfaces through the polled status, never
+                // as a hung or failed REST call.
+                var started = await SendPostAsync<DownloadStatusResponse>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.StartDownloadResultAsync), jobId);
+
+                DownloadStatusResponse terminal;
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                do
+                {
+                    terminal = await SendPostAsync<DownloadStatusResponse>(
+                        http, localRestUrl, nameof(IBlenderBridgeChannel.GetDownloadResultStatusAsync), jobId);
+                    if (terminal.Status != DownloadStatusResponse.STATUS_IN_PROGRESS)
+                        break;
+                    await Task.Delay(50);
+                } while (DateTime.UtcNow < deadline);
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(unknown.Status, Is.EqualTo(DownloadStatusResponse.STATUS_NOT_FOUND));
+                    Assert.That(unknown.JobId, Is.EqualTo(jobId));
+                    Assert.That(cancelled, Is.False);
+                    Assert.That(started.Status, Is.Not.EqualTo(DownloadStatusResponse.STATUS_NOT_FOUND));
+                    Assert.That(terminal.Status, Is.EqualTo(DownloadStatusResponse.STATUS_FAILED));
+                    Assert.That(terminal.Error, Is.Not.Null.And.Not.Empty);
+                });
+            }
+            finally
+            {
+                DeleteTempDirectory(tempDir);
+            }
+        }
+
+        [Test]
+        public async Task UploadStatusEndpointsRespondThroughLocalRestBridgeTest()
+        {
+            var tempDir = CreateTempDirectory();
+            const string localRestUrl = "http://127.0.0.1:17794/bridge/";
+
+            try
+            {
+                await using var bridgeHost = new BridgeLocalHost("http://127.0.0.1:5701", localRestUrl, tempDir);
+                await bridgeHost.StartAsync();
+
+                using var http = new HttpClient();
+
+                var unknown = await SendPostAsync<UploadStatusResponse>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.GetUploadStatusAsync), Guid.NewGuid());
+                var cancelled = await SendPostAsync<bool>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.CancelUploadAsync), Guid.NewGuid());
+
+                // Start with no cloud connection: the endpoint answers immediately and the background
+                // transfer fails on its own — the failure surfaces through the polled status, never
+                // as a hung or failed REST call.
+                var filePath = Path.Combine(tempDir, "scene.blend");
+                await File.WriteAllBytesAsync(filePath, new byte[1024]);
+                var started = await SendPostAsync<UploadStatusResponse>(
+                    http, localRestUrl, nameof(IBlenderBridgeChannel.StartUploadBlendAsync), filePath);
+
+                UploadStatusResponse terminal;
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                do
+                {
+                    terminal = await SendPostAsync<UploadStatusResponse>(
+                        http, localRestUrl, nameof(IBlenderBridgeChannel.GetUploadStatusAsync), started.TransferId);
+                    if (terminal.Status != UploadStatusResponse.STATUS_IN_PROGRESS)
+                        break;
+                    await Task.Delay(50);
+                } while (DateTime.UtcNow < deadline);
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(unknown.Status, Is.EqualTo(UploadStatusResponse.STATUS_NOT_FOUND));
+                    Assert.That(cancelled, Is.False);
+                    Assert.That(started.TransferId, Is.Not.EqualTo(Guid.Empty));
+                    Assert.That(started.FileName, Is.EqualTo("scene.blend"));
+                    Assert.That(terminal.Status, Is.EqualTo(UploadStatusResponse.STATUS_FAILED));
+                    Assert.That(terminal.Error, Is.Not.Null.And.Not.Empty);
+                });
+            }
+            finally
+            {
+                DeleteTempDirectory(tempDir);
+            }
+        }
+
+        [Test]
         public async Task LeaseAcquirePingAndReleaseThroughLocalRestBridgePostCallsTest()
         {
             var tempDir = CreateTempDirectory();

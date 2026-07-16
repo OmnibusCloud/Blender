@@ -49,14 +49,41 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         Task<bool> ReleaseLeaseAsync(string leaseId);
 
         /// <summary>
-        /// Uploads a local Blender scene file into cloud blob storage.
+        /// Uploads a local Blender scene file into cloud blob storage. Blocks until the transfer
+        /// finishes — prefer <see cref="StartUploadBlendAsync"/> + <see cref="GetUploadStatusAsync"/>
+        /// for large files.
         /// </summary>
         Task<UploadBlendResponse> UploadBlendAsync(string filePath);
 
         /// <summary>
-        /// Uploads one local dependency artifact into cloud blob storage.
+        /// Uploads one local dependency artifact into cloud blob storage. Blocks until the transfer
+        /// finishes — prefer <see cref="StartUploadFileAsync"/> + <see cref="GetUploadStatusAsync"/>
+        /// for large files.
         /// </summary>
         Task<UploadBlendResponse> UploadFileAsync(string filePath);
+
+        /// <summary>
+        /// Starts the background upload of a local Blender scene file and returns the transfer's
+        /// status snapshot (with its transfer id) immediately.
+        /// </summary>
+        Task<UploadStatusResponse> StartUploadBlendAsync(string filePath);
+
+        /// <summary>
+        /// Starts the background upload of one local dependency artifact and returns the transfer's
+        /// status snapshot (with its transfer id) immediately.
+        /// </summary>
+        Task<UploadStatusResponse> StartUploadFileAsync(string filePath);
+
+        /// <summary>
+        /// Returns the current status snapshot of one background upload.
+        /// </summary>
+        Task<UploadStatusResponse> GetUploadStatusAsync(Guid transferId);
+
+        /// <summary>
+        /// Requests cancellation of one in-progress background upload. Returns true when an active
+        /// transfer was told to cancel.
+        /// </summary>
+        Task<bool> CancelUploadAsync(Guid transferId);
 
         /// <summary>
         /// Runs the bundled RenderValidateBlend script for one uploaded scene blob.
@@ -230,8 +257,27 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
 
         /// <summary>
         /// Downloads the final result of one bridge-launched job into the local bridge download cache.
+        /// Blocks until the transfer finishes — prefer <see cref="StartDownloadResultAsync"/> +
+        /// <see cref="GetDownloadResultStatusAsync"/> for large results.
         /// </summary>
         Task<DownloadResultResponse> DownloadResultAsync(Guid jobId);
+
+        /// <summary>
+        /// Starts (or joins) the background download of one job's result and returns the current
+        /// status snapshot immediately.
+        /// </summary>
+        Task<DownloadStatusResponse> StartDownloadResultAsync(Guid jobId);
+
+        /// <summary>
+        /// Returns the current status snapshot of one job's background result download.
+        /// </summary>
+        Task<DownloadStatusResponse> GetDownloadResultStatusAsync(Guid jobId);
+
+        /// <summary>
+        /// Requests cancellation of one job's in-progress result download. Returns true when an
+        /// active transfer was told to cancel.
+        /// </summary>
+        Task<bool> CancelDownloadResultAsync(Guid jobId);
 
         /// <summary>
         /// Returns the persisted per-user render preferences (sticky "remember last render settings").
