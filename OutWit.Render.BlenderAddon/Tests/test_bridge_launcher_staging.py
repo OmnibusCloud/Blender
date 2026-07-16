@@ -140,6 +140,21 @@ class StageBridgeRuntimeTests(unittest.TestCase):
 
         self.assertTrue((self.staging_root / "1.0.0").exists(), "a version whose bridge still runs must survive")
 
+    @unittest.skipUnless(os.name == "posix", "unix permission bits only exist on POSIX")
+    def test_staged_executable_regains_the_executable_bit(self):
+        # Blender's extension installer (plain ZipFile.extract) drops unix modes — the bundled
+        # binary arrives 0644 on macOS/Linux. Staging must hand back a spawnable file.
+        self.bundled_exe.chmod(0o644)
+
+        staged = self._stage()
+
+        self.assertTrue(os.access(staged, os.X_OK), "the staged bridge binary must be executable")
+
+        # The reuse path must repair the bit too (a staged copy from a pre-fix version).
+        staged.chmod(0o644)
+        again = self._stage()
+        self.assertTrue(os.access(again, os.X_OK))
+
     def test_stale_version_with_dead_bridge_is_removed(self):
         dead_child = subprocess.Popen([sys.executable, "-c", "pass"])
         dead_child.wait(timeout=10)

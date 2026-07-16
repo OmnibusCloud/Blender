@@ -365,6 +365,7 @@ def stage_bridge_runtime(executable_path: Path, package_root: Path, staging_root
     marker = target_directory / _STAGED_MARKER_NAME
 
     if marker.exists() and staged_executable.exists():
+        _ensure_executable(staged_executable)
         _cleanup_stale_staged_versions(root, version)
         return staged_executable
 
@@ -387,8 +388,22 @@ def stage_bridge_runtime(executable_path: Path, package_root: Path, staging_root
         if not (marker.exists() and staged_executable.exists()):
             raise
 
+    _ensure_executable(staged_executable)
     _cleanup_stale_staged_versions(root, version)
     return staged_executable
+
+
+def _ensure_executable(path: Path) -> None:
+    """Blender's extension installer extracts the addon zip with plain ZipFile.extract, which does
+    NOT restore unix permission bits — on macOS/Linux the bundled bridge binary arrives without +x
+    and could never be spawned. Restore it on the staged copy; no-op on Windows."""
+    if sys.platform.startswith("win"):
+        return
+
+    try:
+        path.chmod(path.stat().st_mode | 0o755)
+    except OSError:
+        pass
 
 
 def _cleanup_stale_staged_versions(staging_root: Path, current_version: str) -> None:
