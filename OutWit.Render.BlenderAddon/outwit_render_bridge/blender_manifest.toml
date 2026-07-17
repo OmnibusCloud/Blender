@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "omnibuscloud_render_bridge"
-version = "1.0.8"
+version = "1.0.9"
 name = "OmnibusCloud Render Bridge"
 tagline = "Thin Blender addon for the local OmnibusCloud render bridge"
 maintainer = "OutWit"
