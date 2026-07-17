@@ -175,9 +175,24 @@ def _get_selected_client_group_id(state) -> str:
     if getattr(state, "run_on_all_nodes", False) and getattr(state, "can_run_on_all_clients", False):
         return ""
     selected = getattr(state, "selected_client_group", "") or ""
-    if not selected or selected in (ALL_CLIENTS_GROUP_ID, NO_GROUP_ID):
-        return ""
-    return selected
+    if selected and selected not in (ALL_CLIENTS_GROUP_ID, NO_GROUP_ID):
+        return selected
+
+    # The dropdown VISUALLY shows the first group whenever the stored enum id is stale (seeded
+    # before groups loaded, or left from another account's session on this machine) — reading the
+    # property then yields ''/placeholder. Submit what the user SEES: fall back to the first
+    # authorized group instead of silently degrading to an all-clients submit, which the engine
+    # (rightly) rejects for accounts without the global grant. Found live: a non-admin's Render
+    # failed "not authorized to launch on all clients" with a group sitting in the dropdown.
+    try:
+        groups = json.loads(getattr(state, "groups_json", "") or "") or []
+    except (ValueError, TypeError):
+        groups = []
+    for group in groups:
+        group_id = str(group.get("id", "")).strip()
+        if group_id:
+            return group_id
+    return ""
 
 
 def _get_runtime_state(context):
@@ -2107,11 +2122,20 @@ def _refresh_bridge_state(context) -> None:
     # choice → pre-check it. When groups exist, leave the choice alone (the Target dropdown defaults to
     # a group); never auto-clobber a user who has groups and deliberately picked all-nodes. Programmatic
     # write → must not queue a preference push.
+    global _suppress_settings_marking
     if state.can_run_on_all_clients and state.group_count == 0 and not state.run_on_all_nodes:
-        global _suppress_settings_marking
         _suppress_settings_marking = True
         try:
             state.run_on_all_nodes = True
+        finally:
+            _suppress_settings_marking = False
+    # The reverse leak: run_on_all_nodes left True by ANOTHER account's session on this machine
+    # (an admin's "all nodes") while THIS account can't run on all — the checkbox is hidden then,
+    # so the stale True is invisible and poisons target resolution. Clear it.
+    if not state.can_run_on_all_clients and state.run_on_all_nodes:
+        _suppress_settings_marking = True
+        try:
+            state.run_on_all_nodes = False
         finally:
             _suppress_settings_marking = False
     if scope_options is not None:

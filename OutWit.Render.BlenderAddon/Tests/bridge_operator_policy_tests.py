@@ -408,6 +408,69 @@ def _create_ready_preflight_response() -> SimpleNamespace:
     )
 
 
+class TargetResolutionFallbackTests(unittest.TestCase):
+    """Pins the launch-target resolution against the live-found failure: a non-admin's Render was
+    submitted UNSCOPED ("all clients") — which the engine rightly rejects — while a group sat in
+    the dropdown, because the stored enum id was stale (seeded before groups loaded, or another
+    account's leftovers on the same machine)."""
+
+    def test_stale_enum_selection_falls_back_to_first_authorized_group(self):
+        state = SimpleNamespace(
+            run_on_all_nodes=False,
+            can_run_on_all_clients=False,
+            selected_client_group="",
+            groups_json='[{"id": "group-1", "name": "Render Friends"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-1")
+
+    def test_all_nodes_leak_without_permission_still_resolves_to_the_group(self):
+        # run_on_all_nodes=True left by an admin session on this machine, current account can't:
+        # the hidden checkbox must not push the submit to all-clients.
+        state = SimpleNamespace(
+            run_on_all_nodes=True,
+            can_run_on_all_clients=False,
+            selected_client_group="",
+            groups_json='[{"id": "group-1", "name": "Render Friends"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-1")
+
+    def test_placeholder_selection_falls_back_to_first_authorized_group(self):
+        state = SimpleNamespace(
+            run_on_all_nodes=False,
+            can_run_on_all_clients=False,
+            selected_client_group=bridge_operators.NO_GROUP_ID,
+            groups_json='[{"id": "group-1", "name": "Render Friends"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-1")
+
+    def test_authorized_all_nodes_choice_stays_unscoped(self):
+        state = SimpleNamespace(
+            run_on_all_nodes=True,
+            can_run_on_all_clients=True,
+            selected_client_group="group-1",
+            groups_json='[{"id": "group-1", "name": "Render Friends"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "")
+
+    def test_explicit_selection_wins_over_the_fallback(self):
+        state = SimpleNamespace(
+            run_on_all_nodes=False,
+            can_run_on_all_clients=False,
+            selected_client_group="group-2",
+            groups_json='[{"id": "group-1", "name": "A"}, {"id": "group-2", "name": "B"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-2")
+
+    def test_no_groups_at_all_resolves_to_unscoped(self):
+        state = SimpleNamespace(
+            run_on_all_nodes=False,
+            can_run_on_all_clients=False,
+            selected_client_group="",
+            groups_json="",
+        )
+        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "")
+
+
 class BridgeOperatorPolicyTests(unittest.TestCase):
     def test_scene_requires_upload_reuploads_after_a_saved_edit(self) -> None:
         # Regression: adding a camera (or any edit) + saving must re-upload even when the path and the
