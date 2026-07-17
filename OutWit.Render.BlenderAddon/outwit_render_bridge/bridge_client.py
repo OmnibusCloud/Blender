@@ -28,15 +28,35 @@ from .bridge_models import (
 TResponse = TypeVar("TResponse")
 
 
-def _append_group(payload: list[Any], selected_client_group_id: str) -> None:
-    """Append the client-group id as a trailing positional arg when one is selected.
+def _resolve_launch_method(
+    group_method: str,
+    project_method: str,
+    payload: list[Any],
+    selected_client_group_id: str,
+    selected_project_id: str,
+) -> str:
+    """Routes a launch to the bridge method matching the selected target, appending the target id.
 
-    The bridge REST processor binds by exact parameter count, so adding the group id
-    routes the call to the group-targeted render overload; omitting it keeps the default
-    "any available client" overload. An empty / blank id means "all clients".
+    The bridge REST processor binds by method NAME + exact parameter count: a group launch appends
+    the group id to the group method; a project launch appends the project id to the
+    ``...InProjectAsync`` method (same arity, different name — a same-count Guid overload would be
+    ambiguous). No target = the default "any available client" overload. Both set is a caller bug —
+    fail fast locally instead of surfacing the engine's rejection after the upload.
     """
-    if selected_client_group_id and selected_client_group_id.strip():
-        payload.append(selected_client_group_id.strip())
+    group_id = (selected_client_group_id or "").strip()
+    project_id = (selected_project_id or "").strip()
+
+    if group_id and project_id:
+        raise BridgeClientError("A launch may target a group or a project, not both.")
+
+    if project_id:
+        payload.append(project_id)
+        return project_method
+
+    if group_id:
+        payload.append(group_id)
+
+    return group_method
 
 
 class BridgeClientError(Exception):
@@ -142,10 +162,12 @@ class BridgeClient:
             video,
         )
 
-    def run_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None, selected_client_group_id: str = "") -> RunRenderResponse:
+    def run_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None, selected_client_group_id: str = "", selected_project_id: str = "") -> RunRenderResponse:
         payload = [scene_blob_id, frame, options, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunRenderStillAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunRenderStillAsync", "RunRenderStillInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     def run_render_still_tiled(
         self,
@@ -157,10 +179,13 @@ class BridgeClient:
         tile_options: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
         selected_client_group_id: str = "",
+        selected_project_id: str = "",
     ) -> RunRenderResponse:
         payload = [scene_blob_id, frame, tiles_x, tiles_y, options, tile_options, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunRenderStillTiledAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunRenderStillTiledAsync", "RunRenderStillTiledInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     def run_render_frames(
         self,
@@ -170,10 +195,13 @@ class BridgeClient:
         options: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
         selected_client_group_id: str = "",
+        selected_project_id: str = "",
     ) -> RunRenderResponse:
         payload = [scene_blob_id, start_frame, end_frame, options, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunRenderFramesAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunRenderFramesAsync", "RunRenderFramesInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     def run_render_video(
         self,
@@ -184,19 +212,24 @@ class BridgeClient:
         video: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
         selected_client_group_id: str = "",
+        selected_project_id: str = "",
     ) -> RunRenderResponse:
         payload = [scene_blob_id, start_frame, end_frame, options, video, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunRenderVideoAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunRenderVideoAsync", "RunRenderVideoInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     # Bake-and-render variants: the controller delegates a simulation bake to the fastest node, then
     # distributes the baked scene exactly like the plain run_render_* counterparts. Same arguments,
     # same response shape; only the bridge method (and the bundled script it resolves) differs. Used
     # when the scene has an unbaked simulation and the artist's bake strategy is "delegated".
-    def run_bake_and_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None, selected_client_group_id: str = "") -> RunRenderResponse:
+    def run_bake_and_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None, selected_client_group_id: str = "", selected_project_id: str = "") -> RunRenderResponse:
         payload = [scene_blob_id, frame, options, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunBakeAndRenderStillAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunBakeAndRenderStillAsync", "RunBakeAndRenderStillInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     def run_bake_and_render_still_tiled(
         self,
@@ -208,10 +241,13 @@ class BridgeClient:
         tile_options: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
         selected_client_group_id: str = "",
+        selected_project_id: str = "",
     ) -> RunRenderResponse:
         payload = [scene_blob_id, frame, tiles_x, tiles_y, options, tile_options, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunBakeAndRenderStillTiledAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunBakeAndRenderStillTiledAsync", "RunBakeAndRenderStillTiledInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     def run_bake_and_render_frames(
         self,
@@ -221,10 +257,13 @@ class BridgeClient:
         options: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
         selected_client_group_id: str = "",
+        selected_project_id: str = "",
     ) -> RunRenderResponse:
         payload = [scene_blob_id, start_frame, end_frame, options, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunBakeAndRenderFramesAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunBakeAndRenderFramesAsync", "RunBakeAndRenderFramesInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     def run_bake_and_render_video(
         self,
@@ -235,10 +274,13 @@ class BridgeClient:
         video: dict[str, Any],
         attached_files: list[dict[str, Any]] | None = None,
         selected_client_group_id: str = "",
+        selected_project_id: str = "",
     ) -> RunRenderResponse:
         payload = [scene_blob_id, start_frame, end_frame, options, video, attached_files or []]
-        _append_group(payload, selected_client_group_id)
-        return self._post("RunBakeAndRenderVideoAsync", RunRenderResponse.from_json, *payload)
+        method = _resolve_launch_method(
+            "RunBakeAndRenderVideoAsync", "RunBakeAndRenderVideoInProjectAsync",
+            payload, selected_client_group_id, selected_project_id)
+        return self._post(method, RunRenderResponse.from_json, *payload)
 
     def get_job(self, job_id: str) -> GetJobResponse:
         return self._post("GetJobAsync", GetJobResponse.from_json, job_id)

@@ -32,6 +32,7 @@ from .bridge_engine_routing import (
     scene_frame_count,
     suggested_render_mode,
 )
+from .bridge_targets import split_target_id
 
 
 # region Phases
@@ -209,38 +210,54 @@ def first_non_empty(*values: str) -> str:
     return ""
 
 
+def _scope_entries(state, attr: str) -> list[dict]:
+    try:
+        entries = json.loads(getattr(state, attr, "") or "") or []
+    except (ValueError, TypeError):
+        entries = []
+    return entries
+
+
 def target_option_count(state) -> int:
-    """How many render targets exist: 'all nodes' (when allowed) plus each authorized group. Always
-    >= 1. Used as the read-only job-context cue (was the Target-dropdown hide test before 'all nodes'
-    became a checkbox)."""
+    """How many render targets exist: 'all nodes' (when allowed) plus each authorized project and
+    group. Always >= 1. Used as the read-only job-context cue (was the Target-dropdown hide test
+    before 'all nodes' became a checkbox)."""
     count = 1 if getattr(state, "can_run_on_all_clients", False) else 0
-    count += authorized_group_count(state)
+    count += authorized_target_count(state)
     return max(1, count)
 
 
 def authorized_group_count(state) -> int:
-    """Number of authorized GROUPS only ('all nodes' is a separate checkbox, not counted here). 0 when
-    the user has no groups — the Target dropdown is then hidden (the all-nodes checkbox covers them)."""
-    try:
-        groups = json.loads(getattr(state, "groups_json", "") or "") or []
-    except (ValueError, TypeError):
-        groups = []
-    return sum(1 for group in groups if str(group.get("id", "")).strip())
+    """Number of authorized GROUPS only ('all nodes' is a separate checkbox, not counted here)."""
+    return sum(1 for group in _scope_entries(state, "groups_json") if str(group.get("id", "")).strip())
+
+
+def authorized_project_count(state) -> int:
+    """Number of PROJECTS (campaigns) the user may launch into."""
+    return sum(1 for project in _scope_entries(state, "projects_json") if str(project.get("id", "")).strip())
+
+
+def authorized_target_count(state) -> int:
+    """Dropdown entries: projects + groups. 0 hides the Target dropdown (the all-nodes checkbox is
+    then the only option — or, without that right, Render is blocked with NO_RENDER_TARGET)."""
+    return authorized_project_count(state) + authorized_group_count(state)
+
+
+def has_render_target(state) -> bool:
+    """Any way to launch at all: the all-nodes right, a project, or a group."""
+    return bool(getattr(state, "can_run_on_all_clients", False)) or authorized_target_count(state) > 0
 
 
 def target_label(state) -> str:
-    """Human label for the resolved render target — 'All nodes' or the selected group's name. Used as
-    the read-only cue while a job runs (the editable controls are hidden then)."""
+    """Human label for the resolved render target — 'All nodes' or the selected project/group name.
+    Used as the read-only cue while a job runs (the editable controls are hidden then)."""
     if getattr(state, "run_on_all_nodes", False) and getattr(state, "can_run_on_all_clients", False):
         return "All nodes"
-    selected = getattr(state, "selected_client_group", "") or ""
-    try:
-        groups = json.loads(getattr(state, "groups_json", "") or "") or []
-    except (ValueError, TypeError):
-        groups = []
-    for group in groups:
-        if str(group.get("id", "")).strip() == selected:
-            return str(group.get("name", "")).strip() or selected
+    kind, raw_id = split_target_id(getattr(state, "selected_client_group", "") or "")
+    entries = _scope_entries(state, "projects_json" if kind == "project" else "groups_json")
+    for entry in entries:
+        if str(entry.get("id", "")).strip() == raw_id:
+            return str(entry.get("name", "")).strip() or raw_id
     return "—"
 
 
@@ -500,6 +517,14 @@ def _connection_phase(state) -> Phase:
 def _primary_blocker(scene, state) -> Blocker | None:
     """The ONE blocker shown above the Render button (when signed-in + connected). Mirrors the old
     `_can_start_render` gate, but as a typed, fixable blocker."""
+    # Launch-week req 4: a signed-in account with NO target at all (no all-nodes right, no project,
+    # no group) gets a specific message and a greyed Render — not a server rejection after upload.
+    if not has_render_target(state):
+        return Blocker(
+            BlockerKind.NO_ELIGIBLE_TARGET,
+            "No render target — join a render group or start a campaign first",
+        )
+
     if not getattr(state, "can_launch", False):
         return Blocker(BlockerKind.NO_ELIGIBLE_TARGET, "No eligible render clients available")
 

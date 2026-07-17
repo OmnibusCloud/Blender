@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from .bridge_models import RenderSettingsResponse
+from .bridge_targets import group_target_id, project_target_id, split_target_id
 
 _ANIM_RESULTS = {"Sequence", "Video"}
 _BAKE_STRATEGIES = {"DELEGATED", "LOCAL"}
@@ -71,12 +72,15 @@ def resolve_target_seed(
     settings: RenderSettingsResponse,
     groups: list[dict[str, Any]],
     can_run_on_all_clients: bool,
+    projects: list[dict[str, Any]] | None = None,
 ) -> tuple[str, bool] | None:
     """Resolves the remembered render target against the CURRENT scope.
 
-    Returns ``(group_id_to_select, run_on_all_nodes)`` or ``None`` when nothing should change:
-    master toggle off, the remembered group no longer exists (fallback = leave the defaults), or
-    "all nodes" was remembered but the account lost that right.
+    Returns ``(unified_target_id_to_select, run_on_all_nodes)`` or ``None`` when nothing should
+    change: master toggle off, the remembered target no longer exists (fallback = leave the
+    defaults), or "all nodes" was remembered but the account lost that right. The store's
+    ``LastGroupId`` field carries the UNIFIED prefixed id since projects joined the dropdown —
+    a legacy bare guid still reads as a group (split_target_id's back-compat).
     """
     if not settings.remember_render_settings:
         return None
@@ -86,22 +90,35 @@ def resolve_target_seed(
         # Empty id = the last run targeted all nodes; only restore while that is still allowed.
         return ("", True) if can_run_on_all_clients else None
 
+    kind, raw_id = split_target_id(last_id)
+
+    if kind == "project":
+        for project in projects or []:
+            if str(project.get("id", "")).strip() == raw_id:
+                return (project_target_id(raw_id), False)
+        return None
+
     for group in groups:
-        if str(group.get("id", "")).strip() == last_id:
-            return (last_id, False)
+        if str(group.get("id", "")).strip() == raw_id:
+            return (group_target_id(raw_id), False)
 
     return None
 
 
-def group_name_for(groups: list[dict[str, Any]], group_id: str) -> str:
-    """Display name for a group id from the scope's groups list ("" when not found / all nodes)."""
-    wanted = (group_id or "").strip()
-    if not wanted:
+def target_name_for(
+    groups: list[dict[str, Any]],
+    projects: list[dict[str, Any]],
+    target_id: str,
+) -> str:
+    """Display name for a unified target id ("" when not found / all nodes)."""
+    kind, raw_id = split_target_id(target_id)
+    if not raw_id:
         return ""
 
-    for group in groups:
-        if str(group.get("id", "")).strip() == wanted:
-            return str(group.get("name", "")).strip()
+    entries = projects if kind == "project" else groups
+    for entry in entries:
+        if str(entry.get("id", "")).strip() == raw_id:
+            return str(entry.get("name", "")).strip()
 
     return ""
 
@@ -117,13 +134,14 @@ def compose_sticky_payload(
     anim_result: str,
     video_format: str,
     video_crf: int,
-    group_id: str,
-    group_name: str,
+    target_id: str,
+    target_name: str,
     bake_strategy: str,
 ) -> dict[str, Any]:
     """Read-modify-write: overlay the addon-owned bucket-1 values on the bridge's CURRENT snapshot.
     ``remember`` comes from the live UI toggle — the authoritative intent even if a previous toggle
-    push is still pending."""
+    push is still pending. ``target_id`` is the UNIFIED prefixed id (or "" for all nodes); it lands
+    in the store's historically named ``LastGroupId`` field, which the bridge round-trips opaquely."""
     container, codec = video_store_from_format(video_format)
     payload = current.to_payload()
     payload.update({
@@ -136,8 +154,8 @@ def compose_sticky_payload(
         "VideoContainer": container,
         "VideoCodec": codec,
         "VideoCrf": int(video_crf),
-        "LastGroupId": group_id or "",
-        "LastGroupName": group_name or "",
+        "LastGroupId": target_id or "",
+        "LastGroupName": target_name or "",
         "BakeStrategy": bake_strategy or _DEFAULT_BAKE_STRATEGY,
     })
     return payload

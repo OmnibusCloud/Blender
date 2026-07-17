@@ -78,6 +78,13 @@ def _load_bridge_status():
     deps.LOCAL_BAKE_AVAILABLE = False
     sys.modules[_PKG + ".bridge_dependency_policy"] = deps
 
+    # bridge_targets is a dependency-free leaf (unified target-id format) — load the real one.
+    targets_path = os.path.abspath(os.path.join(base, "bridge_targets.py"))
+    targets_spec = importlib.util.spec_from_file_location(_PKG + ".bridge_targets", targets_path)
+    targets_module = importlib.util.module_from_spec(targets_spec)
+    sys.modules[targets_spec.name] = targets_module
+    targets_spec.loader.exec_module(targets_module)
+
     path = os.path.join(base, "bridge_status.py")
     spec = importlib.util.spec_from_file_location(_PKG + ".bridge_status", os.path.abspath(path))
     module = importlib.util.module_from_spec(spec)
@@ -105,6 +112,9 @@ def make_state(**overrides):
         # connection / auth
         bridge_is_running=True, bridge_executable_path="", is_connected_to_cloud=True, is_signed_in=True,
         can_launch=True,
+        # execution scope (a target must exist or NO_ELIGIBLE_TARGET blocks — launch-week req 4)
+        can_run_on_all_clients=False,
+        groups_json='[{"id": "group-1", "name": "Render Friends"}]', projects_json="",
         # scene / blend
         current_blend_path="/proj/scene.blend", current_blend_file_exists=True, current_blend_is_dirty=False,
         scene_engine_family="Cycles", render_mode="Still",
@@ -176,6 +186,24 @@ class ComputeStatusTests(unittest.TestCase):
         view = status.compute_status(make_scene(), make_state(can_launch=False))
         self.assertEqual(view.phase, status.Phase.BLOCKED)
         self.assertEqual(view.blocker.kind, status.BlockerKind.NO_ELIGIBLE_TARGET)
+
+    def test_no_render_target_at_all_blocks_before_anything_else(self):
+        # Launch-week req 4: no all-nodes right, no project, no group → Render greyed with a
+        # specific message, never a server rejection after the upload.
+        view = status.compute_status(make_scene(), make_state(groups_json="", projects_json=""))
+        self.assertEqual(view.phase, status.Phase.BLOCKED)
+        self.assertEqual(view.blocker.kind, status.BlockerKind.NO_ELIGIBLE_TARGET)
+        self.assertIn("No render target", view.blocker.message)
+
+    def test_a_project_alone_is_a_valid_target(self):
+        view = status.compute_status(make_scene(), make_state(
+            groups_json="", projects_json='[{"id": "proj-1", "name": "Town Asset"}]'))
+        self.assertEqual(view.phase, status.Phase.READY)
+
+    def test_the_all_nodes_right_alone_is_a_valid_target(self):
+        view = status.compute_status(make_scene(), make_state(
+            can_run_on_all_clients=True, groups_json="", projects_json=""))
+        self.assertEqual(view.phase, status.Phase.READY)
 
     def test_unsaved_scene_blocks_with_save_fix(self):
         view = status.compute_status(make_scene(), make_state(current_blend_file_exists=False))

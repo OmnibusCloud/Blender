@@ -46,9 +46,9 @@ from .bridge_launcher import (
 from .bridge_render_settings import (
     compose_remember_payload,
     compose_sticky_payload,
-    group_name_for,
     resolve_target_seed,
     seed_prop_values,
+    target_name_for,
 )
 from .bridge_scene_attachments import (
     collect_missing_file_dependencies,
@@ -59,6 +59,7 @@ from .bridge_scene_attachments import (
 from .bridge_scene_packaging import create_packed_upload_copy, scene_output_signature, ScenePackagingError
 from .bridge_state import ALL_CLIENTS_GROUP_ID, NO_GROUP_ID, apply_render_mode_to_axes
 from .bridge_status import format_bytes
+from .bridge_targets import group_target_id, project_target_id, split_target_id
 
 FORMAT_PNG = 0
 FORMAT_EXR = 1
@@ -168,30 +169,55 @@ def _get_context_directory(context) -> str:
     return get_effective_context_directory(context)
 
 
-def _get_selected_client_group_id(state) -> str:
-    """Resolves the render target to a group id, or '' for the unscoped 'all nodes' option.
-    'All nodes' is now the run_on_all_nodes checkbox (only honoured when the account allows it); the
-    Target dropdown carries groups only."""
+def _first_scope_id(state, attr: str) -> str:
+    try:
+        entries = json.loads(getattr(state, attr, "") or "") or []
+    except (ValueError, TypeError):
+        entries = []
+    for entry in entries:
+        entry_id = str(entry.get("id", "")).strip()
+        if entry_id:
+            return entry_id
+    return ""
+
+
+def _get_selected_target(state) -> tuple[str, str]:
+    """Resolves the render target to ``(group_id, project_id)`` — at most one set; both '' for the
+    unscoped 'all nodes' option. 'All nodes' is the run_on_all_nodes checkbox (only honoured when
+    the account allows it); the Target dropdown carries projects + groups (prefixed unified ids)."""
     if getattr(state, "run_on_all_nodes", False) and getattr(state, "can_run_on_all_clients", False):
-        return ""
+        return ("", "")
+
     selected = getattr(state, "selected_client_group", "") or ""
     if selected and selected not in (ALL_CLIENTS_GROUP_ID, NO_GROUP_ID):
-        return selected
+        kind, raw_id = split_target_id(selected)
+        if raw_id:
+            return ("", raw_id) if kind == "project" else (raw_id, "")
 
-    # The dropdown VISUALLY shows the first group whenever the stored enum id is stale (seeded
-    # before groups loaded, or left from another account's session on this machine) — reading the
-    # property then yields ''/placeholder. Submit what the user SEES: fall back to the first
-    # authorized group instead of silently degrading to an all-clients submit, which the engine
-    # (rightly) rejects for accounts without the global grant. Found live: a non-admin's Render
-    # failed "not authorized to launch on all clients" with a group sitting in the dropdown.
-    try:
-        groups = json.loads(getattr(state, "groups_json", "") or "") or []
-    except (ValueError, TypeError):
-        groups = []
-    for group in groups:
-        group_id = str(group.get("id", "")).strip()
-        if group_id:
-            return group_id
+    # The dropdown VISUALLY shows the first entry whenever the stored enum id is stale (seeded
+    # before the scope loaded, left from another account's session on this machine, or a bare
+    # pre-1.0.10 group id that no longer matches the prefixed items) — reading the property then
+    # yields ''/placeholder. Submit what the user SEES: fall back to the first entry in dropdown
+    # order (projects first, then groups) instead of silently degrading to an all-clients submit,
+    # which the engine (rightly) rejects for accounts without the global grant. Found live: a
+    # non-admin's Render failed "not authorized to launch on all clients" with a group sitting in
+    # the dropdown.
+    project_id = _first_scope_id(state, "projects_json")
+    if project_id:
+        return ("", project_id)
+    group_id = _first_scope_id(state, "groups_json")
+    if group_id:
+        return (group_id, "")
+    return ("", "")
+
+
+def _get_selected_target_unified_id(state) -> str:
+    """The unified prefixed id for the resolved target ('' for all nodes) — the sticky-store value."""
+    group_id, project_id = _get_selected_target(state)
+    if project_id:
+        return project_target_id(project_id)
+    if group_id:
+        return group_target_id(group_id)
     return ""
 
 
@@ -1364,9 +1390,10 @@ def on_remember_render_settings_changed(context) -> None:
 
 
 def _seed_remembered_target(context, client) -> None:
-    """Restore the remembered render target once the execution scope (groups) is known — the group
-    dropdown can only be set to ids that exist in the freshly written groups_json. One attempt per
-    Blender session; a vanished group simply leaves the default selection (the agreed fallback)."""
+    """Restore the remembered render target once the execution scope (projects + groups) is known —
+    the Target dropdown can only be set to ids that exist in the freshly written projects_json /
+    groups_json. One attempt per Blender session; a vanished target simply leaves the default
+    selection (the agreed fallback)."""
     global _render_settings_target_seeded
     state = _get_runtime_state(context)
     if _render_settings_target_seeded:
@@ -1376,7 +1403,8 @@ def _seed_remembered_target(context, client) -> None:
     try:
         settings = client.get_render_settings()
         groups = json.loads(state.groups_json) if state.groups_json else []
-        target = resolve_target_seed(settings, groups, state.can_run_on_all_clients)
+        projects = json.loads(state.projects_json) if state.projects_json else []
+        target = resolve_target_seed(settings, groups, state.can_run_on_all_clients, projects)
     except Exception:
         return
 
@@ -1386,10 +1414,10 @@ def _seed_remembered_target(context, client) -> None:
     global _applying_settings_seed
     _applying_settings_seed = True
     try:
-        group_id, run_on_all = target
+        target_id, run_on_all = target
         state.run_on_all_nodes = run_on_all
-        if group_id:
-            state.selected_client_group = group_id
+        if target_id:
+            state.selected_client_group = target_id
     finally:
         _applying_settings_seed = False
 
@@ -1399,8 +1427,9 @@ def _push_render_settings(context) -> None:
     state = _get_runtime_state(context)
     client = _get_bridge_client(context)
     current = client.get_render_settings()
-    group_id = _get_selected_client_group_id(state)
+    target_id = _get_selected_target_unified_id(state)
     groups = json.loads(state.groups_json) if state.groups_json else []
+    projects = json.loads(state.projects_json) if state.projects_json else []
     client.set_render_settings(compose_sticky_payload(
         current,
         remember=True,
@@ -1411,8 +1440,8 @@ def _push_render_settings(context) -> None:
         anim_result=state.anim_result,
         video_format=getattr(state, "video_format", ""),
         video_crf=int(state.video_constant_rate_factor),
-        group_id=group_id,
-        group_name=group_name_for(groups, group_id),
+        target_id=target_id,
+        target_name=target_name_for(groups, projects, target_id),
         bake_strategy=getattr(state, "bake_strategy", "DELEGATED"),
     ))
 
@@ -1533,12 +1562,12 @@ def _run_selected_launch(context, *, bake: bool = False):
 
     render_options = _collect_render_options(context)
     still_frame = _get_still_frame(context)
-    group_id = _get_selected_client_group_id(state)
+    group_id, project_id = _get_selected_target(state)
     attachments = _get_uploaded_attachment_manifest(state)
 
     if state.render_mode == "Still":
         run = client.run_bake_and_render_still if bake else client.run_render_still
-        response = run(blob_id, still_frame, render_options, attachments, group_id)
+        response = run(blob_id, still_frame, render_options, attachments, group_id, project_id)
         _apply_job_response(state, response, "BakeAndRenderStill" if bake else "RenderStill")
         return response
 
@@ -1553,6 +1582,7 @@ def _run_selected_launch(context, *, bake: bool = False):
             _collect_tile_options(state),
             attachments,
             group_id,
+            project_id,
         )
         _apply_job_response(state, response, "BakeAndRenderStillTiled" if bake else "RenderStillTiled")
         return response
@@ -1566,6 +1596,7 @@ def _run_selected_launch(context, *, bake: bool = False):
             render_options,
             attachments,
             group_id,
+            project_id,
         )
         _apply_job_response(state, response, "BakeAndRenderFrames" if bake else "RenderFrames")
         return response
@@ -1579,6 +1610,7 @@ def _run_selected_launch(context, *, bake: bool = False):
         _collect_video_options(state),
         attachments,
         group_id,
+        project_id,
     )
     _apply_job_response(state, response, "BakeAndRenderVideo" if bake else "RenderVideo")
     return response
@@ -2118,12 +2150,17 @@ def _refresh_bridge_state(context) -> None:
         json.dumps([{"id": group.group_id, "name": group.name} for group in scope_options.groups])
         if scope_options else ""
     )
-    # Default the target: with all-nodes permission but NO groups, "Run on all nodes" is the only valid
-    # choice → pre-check it. When groups exist, leave the choice alone (the Target dropdown defaults to
-    # a group); never auto-clobber a user who has groups and deliberately picked all-nodes. Programmatic
-    # write → must not queue a preference push.
+    state.projects_json = (
+        json.dumps([{"id": project.project_id, "name": project.name} for project in scope_options.projects])
+        if scope_options else ""
+    )
+    # Default the target: with all-nodes permission but NO dropdown targets (no groups, no projects),
+    # "Run on all nodes" is the only valid choice → pre-check it. When targets exist, leave the choice
+    # alone (the Target dropdown defaults to an entry); never auto-clobber a user who has targets and
+    # deliberately picked all-nodes. Programmatic write → must not queue a preference push.
     global _suppress_settings_marking
-    if state.can_run_on_all_clients and state.group_count == 0 and not state.run_on_all_nodes:
+    if state.can_run_on_all_clients and state.group_count == 0 and state.project_count == 0 \
+            and not state.run_on_all_nodes:
         _suppress_settings_marking = True
         try:
             state.run_on_all_nodes = True

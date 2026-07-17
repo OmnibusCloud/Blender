@@ -289,6 +289,62 @@ namespace OutWit.Render.BlenderBridge.Channels
             return RenderLaunchService.RunBakeAndRenderVideoAsync(sceneBlobId, startFrame, endFrame, options, video, attachedFiles, selectedClientGroupId);
         }
 
+        public Task<RunRenderStillResponse> RunRenderStillInProjectAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunRenderStillAsync(sceneBlobId, frame, options, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
+        public Task<RunRenderStillTiledResponse> RunRenderStillTiledInProjectAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunRenderStillTiledAsync(sceneBlobId, frame, tilesX, tilesY, options, tileOptions, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
+        public Task<RunRenderFramesResponse> RunRenderFramesInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunRenderFramesAsync(sceneBlobId, startFrame, endFrame, options, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
+        public Task<RunRenderVideoResponse> RunRenderVideoInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunRenderVideoAsync(sceneBlobId, startFrame, endFrame, options, video, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
+        public Task<RunRenderStillResponse> RunBakeAndRenderStillInProjectAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunBakeAndRenderStillAsync(sceneBlobId, frame, options, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
+        public Task<RunRenderStillTiledResponse> RunBakeAndRenderStillTiledInProjectAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunBakeAndRenderStillTiledAsync(sceneBlobId, frame, tilesX, tilesY, options, tileOptions, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
+        public Task<RunRenderFramesResponse> RunBakeAndRenderFramesInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunBakeAndRenderFramesAsync(sceneBlobId, startFrame, endFrame, options, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
+        public Task<RunRenderVideoResponse> RunBakeAndRenderVideoInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId)
+        {
+            return RenderLaunchService.RunBakeAndRenderVideoAsync(sceneBlobId, startFrame, endFrame, options, video, attachedFiles, selectedProjectId: selectedProjectId);
+        }
+
         public Task<GetJobResponse> GetJobAsync(Guid jobId)
         {
             return JobQueryService.GetJobAsync(jobId);

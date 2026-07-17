@@ -7,14 +7,15 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, Po
 from bpy.types import PropertyGroup, WindowManager
 
 from .bridge_status import axes_for_render_mode, render_mode_for_axes
+from .bridge_targets import group_target_id, project_target_id
 
 
 # Sentinel enum identifier for the "any available client" target (no specific group). Kept for
-# back-compat in the group-id resolver; "all nodes" is now a separate checkbox (run_on_all_nodes),
+# back-compat in the target resolver; "all nodes" is now a separate checkbox (run_on_all_nodes),
 # not an entry in the Target dropdown.
 ALL_CLIENTS_GROUP_ID = "__ALL__"
 
-# Placeholder identifier when the user has no authorized groups — keeps the EnumProperty non-empty
+# Placeholder identifier when the user has no targets at all — keeps the EnumProperty non-empty
 # (Blender requires >= 1 item) while the control is hidden/disabled.
 NO_GROUP_ID = "__NONE__"
 
@@ -24,30 +25,40 @@ NO_GROUP_ID = "__NONE__"
 _GROUP_ENUM_ITEMS_CACHE: list[tuple[str, str, str]] = []
 
 
-def selected_group_items(self, context):
-    """Builds the Target dropdown: the authorized GROUPS only.
+def _parse_scope_json(raw: str) -> list:
+    try:
+        return json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        return []
+
+
+def selected_target_items(self, context):
+    """Builds the unified Target dropdown: the user's PROJECTS (campaigns) first, then the
+    authorized GROUPS — ids carry a ``p:``/``g:`` prefix (see bridge_status.split_target_id).
 
     'All clients / all nodes' is NOT an entry here — it is a separate checkbox (run_on_all_nodes),
-    so Target always means "a specific group". Reads the groups the bridge reported for the signed-in
-    user (serialized into ``groups_json``). A placeholder keeps the enum non-empty when the user has
-    no groups (the control is hidden/disabled in that case).
+    so Target always means "a specific project or group". Reads what the bridge reported for the
+    signed-in user (``projects_json`` / ``groups_json``). A placeholder keeps the enum non-empty
+    when there are no targets (the control is hidden/disabled in that case).
     """
     items: list[tuple[str, str, str]] = []
 
-    try:
-        groups = json.loads(self.groups_json) if self.groups_json else []
-    except (ValueError, TypeError):
-        groups = []
+    for project in _parse_scope_json(self.projects_json):
+        project_id = str(project.get("id", "")).strip()
+        if not project_id:
+            continue
+        name = str(project.get("name", "")).strip() or project_id
+        items.append((project_target_id(project_id), name, f"Render into project '{name}'"))
 
-    for group in groups:
+    for group in _parse_scope_json(self.groups_json):
         group_id = str(group.get("id", "")).strip()
         if not group_id:
             continue
         name = str(group.get("name", "")).strip() or group_id
-        items.append((group_id, name, f"Render on group '{name}'"))
+        items.append((group_target_id(group_id), name, f"Render on group '{name}'"))
 
     if not items:
-        items.append((NO_GROUP_ID, "No groups", "You have no authorized render groups"))
+        items.append((NO_GROUP_ID, "No targets", "You have no projects or render groups to launch into"))
 
     _GROUP_ENUM_ITEMS_CACHE.clear()
     _GROUP_ENUM_ITEMS_CACHE.extend(items)
@@ -254,10 +265,12 @@ class OutWitBridgeRuntimeState(PropertyGroup):
     group_count: IntProperty(name="Group Count", default=0)
     project_count: IntProperty(name="Project Count", default=0)
     groups_json: StringProperty(name="Groups Json", default="")
+    projects_json: StringProperty(name="Projects Json", default="")
+    # Historic name (pre-project era); the enum now carries the UNIFIED prefixed target ids.
     selected_client_group: EnumProperty(
         name="Target",
-        description="Which group of nodes to render on",
-        items=selected_group_items,
+        description="Which project or group of nodes to render on",
+        items=selected_target_items,
         update=_mark_render_settings_changed,
     )
     run_on_all_nodes: BoolProperty(

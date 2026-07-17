@@ -49,7 +49,7 @@ def _load_modules():
     sys.modules[_PKG] = pkg
 
     base = os.path.join(os.path.dirname(__file__), "..", "outwit_render_bridge")
-    for name in ("bridge_models", "bridge_render_settings"):
+    for name in ("bridge_models", "bridge_targets", "bridge_render_settings"):
         path = os.path.abspath(os.path.join(base, name + ".py"))
         spec = importlib.util.spec_from_file_location(f"{_PKG}.{name}", path)
         module = importlib.util.module_from_spec(spec)
@@ -65,6 +65,11 @@ RenderSettingsResponse = _MODELS.RenderSettingsResponse
 _GROUPS = [
     {"id": "g-1", "name": "Studio GPUs"},
     {"id": "g-2", "name": "Render Farm B"},
+]
+
+_PROJECTS = [
+    {"id": "p-1", "name": "Town Asset"},
+    {"id": "p-2", "name": "Spring Rig"},
 ]
 
 
@@ -168,17 +173,35 @@ class SeedPropValuesTests(unittest.TestCase):
 
 class ResolveTargetSeedTests(unittest.TestCase):
     def test_returns_none_when_remember_is_off(self):
-        settings = RenderSettingsResponse(remember_render_settings=False, last_group_id="g-1")
+        settings = RenderSettingsResponse(remember_render_settings=False, last_group_id="g:g-1")
 
         self.assertIsNone(_LOGIC.resolve_target_seed(settings, _GROUPS, True))
 
     def test_restores_remembered_group_when_it_still_exists(self):
+        settings = RenderSettingsResponse(last_group_id="g:g-2")
+
+        self.assertEqual(_LOGIC.resolve_target_seed(settings, _GROUPS, False), ("g:g-2", False))
+
+    def test_legacy_bare_group_id_restores_as_prefixed_group(self):
+        # Stores written before projects joined the dropdown hold a bare guid — it must resolve
+        # as a group and come back in the new prefixed enum format.
         settings = RenderSettingsResponse(last_group_id="g-2")
 
-        self.assertEqual(_LOGIC.resolve_target_seed(settings, _GROUPS, False), ("g-2", False))
+        self.assertEqual(_LOGIC.resolve_target_seed(settings, _GROUPS, False), ("g:g-2", False))
+
+    def test_restores_remembered_project_when_it_still_exists(self):
+        settings = RenderSettingsResponse(last_group_id="p:p-2")
+
+        self.assertEqual(
+            _LOGIC.resolve_target_seed(settings, _GROUPS, False, _PROJECTS), ("p:p-2", False))
+
+    def test_vanished_project_falls_back_to_defaults(self):
+        settings = RenderSettingsResponse(last_group_id="p:p-gone")
+
+        self.assertIsNone(_LOGIC.resolve_target_seed(settings, _GROUPS, True, _PROJECTS))
 
     def test_vanished_group_falls_back_to_defaults(self):
-        settings = RenderSettingsResponse(last_group_id="g-gone")
+        settings = RenderSettingsResponse(last_group_id="g:g-gone")
 
         self.assertIsNone(_LOGIC.resolve_target_seed(settings, _GROUPS, True))
 
@@ -189,13 +212,20 @@ class ResolveTargetSeedTests(unittest.TestCase):
         self.assertIsNone(_LOGIC.resolve_target_seed(settings, _GROUPS, False))
 
 
-class GroupNameForTests(unittest.TestCase):
+class TargetNameForTests(unittest.TestCase):
     def test_resolves_known_group_name(self):
-        self.assertEqual(_LOGIC.group_name_for(_GROUPS, "g-1"), "Studio GPUs")
+        self.assertEqual(_LOGIC.target_name_for(_GROUPS, _PROJECTS, "g:g-1"), "Studio GPUs")
+
+    def test_resolves_known_project_name(self):
+        self.assertEqual(_LOGIC.target_name_for(_GROUPS, _PROJECTS, "p:p-1"), "Town Asset")
+
+    def test_legacy_bare_group_id_resolves_as_group(self):
+        self.assertEqual(_LOGIC.target_name_for(_GROUPS, _PROJECTS, "g-1"), "Studio GPUs")
 
     def test_unknown_or_empty_id_resolves_to_empty(self):
-        self.assertEqual(_LOGIC.group_name_for(_GROUPS, "g-gone"), "")
-        self.assertEqual(_LOGIC.group_name_for(_GROUPS, ""), "")
+        self.assertEqual(_LOGIC.target_name_for(_GROUPS, _PROJECTS, "g:g-gone"), "")
+        self.assertEqual(_LOGIC.target_name_for(_GROUPS, _PROJECTS, "p:p-gone"), "")
+        self.assertEqual(_LOGIC.target_name_for(_GROUPS, _PROJECTS, ""), "")
 
 
 class ComposeStickyPayloadTests(unittest.TestCase):
@@ -212,8 +242,8 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             anim_result="Video",
             video_format="WEBM_VP9",
             video_crf=28,
-            group_id="g-1",
-            group_name="Studio GPUs",
+            target_id="g:g-1",
+            target_name="Studio GPUs",
             bake_strategy="LOCAL",
         )
 
@@ -225,7 +255,7 @@ class ComposeStickyPayloadTests(unittest.TestCase):
         self.assertEqual(payload["VideoContainer"], "WEBM")
         self.assertEqual(payload["VideoCodec"], "VP9")
         self.assertEqual(payload["VideoCrf"], 28)
-        self.assertEqual(payload["LastGroupId"], "g-1")
+        self.assertEqual(payload["LastGroupId"], "g:g-1")
         self.assertEqual(payload["LastGroupName"], "Studio GPUs")
         self.assertEqual(payload["BakeStrategy"], "LOCAL")
 
@@ -240,8 +270,8 @@ class ComposeStickyPayloadTests(unittest.TestCase):
             anim_result="Sequence",
             video_format="MP4_H264",
             video_crf=23,
-            group_id="",
-            group_name="",
+            target_id="",
+            target_name="",
             bake_strategy="DELEGATED",
         )
 

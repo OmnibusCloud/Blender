@@ -39,6 +39,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -53,6 +54,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             TileOptionsData tileOptions,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -65,6 +67,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -78,6 +81,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             VideoOptionsData video,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -90,6 +94,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -105,6 +110,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             TileOptionsData tileOptions,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -118,6 +124,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -132,6 +139,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             VideoOptionsData video,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
     }
 }

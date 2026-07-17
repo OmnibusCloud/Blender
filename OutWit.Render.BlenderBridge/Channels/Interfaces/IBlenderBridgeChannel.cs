@@ -245,6 +245,66 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
         /// </summary>
         Task<RunRenderVideoResponse> RunBakeAndRenderVideoAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedClientGroupId);
 
+        // Project-targeted launches (campaigns). The REST processor binds positional calls by METHOD
+        // NAME + argument count, so a same-arity Guid overload of the group variants would be
+        // ambiguous — each project launch is its own method name.
+
+        /// <summary>
+        /// Launches the bundled RenderStill script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderStillResponse> RunRenderStillInProjectAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId);
+
+        /// <summary>
+        /// Launches the bundled RenderStillTiled script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderStillTiledResponse> RunRenderStillTiledInProjectAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            Guid selectedProjectId);
+
+        /// <summary>
+        /// Launches the bundled RenderFrames script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderFramesResponse> RunRenderFramesInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId);
+
+        /// <summary>
+        /// Launches the bundled RenderVideo script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderVideoResponse> RunRenderVideoInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderStill script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderStillResponse> RunBakeAndRenderStillInProjectAsync(Guid sceneBlobId, int frame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderStillTiled script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderStillTiledResponse> RunBakeAndRenderStillTiledInProjectAsync(
+            Guid sceneBlobId,
+            int frame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            Guid selectedProjectId);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderFrames script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderFramesResponse> RunBakeAndRenderFramesInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId);
+
+        /// <summary>
+        /// Launches the bundled BakeAndRenderVideo script targeted at a specific project (campaign).
+        /// </summary>
+        Task<RunRenderVideoResponse> RunBakeAndRenderVideoInProjectAsync(Guid sceneBlobId, int startFrame, int endFrame, RenderOptionsData options, VideoOptionsData video, List<RenderSceneAttachmentRefData> attachedFiles, Guid selectedProjectId);
+
         /// <summary>
         /// Returns the current summary of one bridge-launched cloud job.
         /// </summary>

@@ -84,8 +84,8 @@ def _load_bridge_operators_module():
     render_settings_module = types.ModuleType(f"{PACKAGE_NAME}.bridge_render_settings")
     render_settings_module.compose_remember_payload = lambda current, remember: {}
     render_settings_module.compose_sticky_payload = lambda current, **kwargs: {}
-    render_settings_module.group_name_for = lambda groups, group_id: ""
-    render_settings_module.resolve_target_seed = lambda settings, groups, can_all: None
+    render_settings_module.target_name_for = lambda groups, projects, target_id: ""
+    render_settings_module.resolve_target_seed = lambda settings, groups, can_all, projects=None: None
     render_settings_module.seed_prop_values = lambda settings: {}
     sys.modules[f"{PACKAGE_NAME}.bridge_render_settings"] = render_settings_module
 
@@ -412,7 +412,7 @@ class TargetResolutionFallbackTests(unittest.TestCase):
     """Pins the launch-target resolution against the live-found failure: a non-admin's Render was
     submitted UNSCOPED ("all clients") — which the engine rightly rejects — while a group sat in
     the dropdown, because the stored enum id was stale (seeded before groups loaded, or another
-    account's leftovers on the same machine)."""
+    account's leftovers on the same machine). Resolution returns ``(group_id, project_id)``."""
 
     def test_stale_enum_selection_falls_back_to_first_authorized_group(self):
         state = SimpleNamespace(
@@ -421,7 +421,19 @@ class TargetResolutionFallbackTests(unittest.TestCase):
             selected_client_group="",
             groups_json='[{"id": "group-1", "name": "Render Friends"}]',
         )
-        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-1")
+        self.assertEqual(bridge_operators._get_selected_target(state), ("group-1", ""))
+
+    def test_stale_enum_selection_prefers_the_first_project_in_dropdown_order(self):
+        # Projects render FIRST in the unified dropdown, so the "submit what the user sees"
+        # fallback must pick the first project, not the first group.
+        state = SimpleNamespace(
+            run_on_all_nodes=False,
+            can_run_on_all_clients=False,
+            selected_client_group="",
+            groups_json='[{"id": "group-1", "name": "Render Friends"}]',
+            projects_json='[{"id": "proj-1", "name": "Town Asset"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_target(state), ("", "proj-1"))
 
     def test_all_nodes_leak_without_permission_still_resolves_to_the_group(self):
         # run_on_all_nodes=True left by an admin session on this machine, current account can't:
@@ -432,7 +444,7 @@ class TargetResolutionFallbackTests(unittest.TestCase):
             selected_client_group="",
             groups_json='[{"id": "group-1", "name": "Render Friends"}]',
         )
-        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-1")
+        self.assertEqual(bridge_operators._get_selected_target(state), ("group-1", ""))
 
     def test_placeholder_selection_falls_back_to_first_authorized_group(self):
         state = SimpleNamespace(
@@ -441,34 +453,54 @@ class TargetResolutionFallbackTests(unittest.TestCase):
             selected_client_group=bridge_operators.NO_GROUP_ID,
             groups_json='[{"id": "group-1", "name": "Render Friends"}]',
         )
-        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-1")
+        self.assertEqual(bridge_operators._get_selected_target(state), ("group-1", ""))
 
     def test_authorized_all_nodes_choice_stays_unscoped(self):
         state = SimpleNamespace(
             run_on_all_nodes=True,
             can_run_on_all_clients=True,
-            selected_client_group="group-1",
+            selected_client_group="g:group-1",
             groups_json='[{"id": "group-1", "name": "Render Friends"}]',
         )
-        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "")
+        self.assertEqual(bridge_operators._get_selected_target(state), ("", ""))
 
-    def test_explicit_selection_wins_over_the_fallback(self):
+    def test_explicit_group_selection_wins_over_the_fallback(self):
+        state = SimpleNamespace(
+            run_on_all_nodes=False,
+            can_run_on_all_clients=False,
+            selected_client_group="g:group-2",
+            groups_json='[{"id": "group-1", "name": "A"}, {"id": "group-2", "name": "B"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_target(state), ("group-2", ""))
+
+    def test_explicit_project_selection_resolves_to_the_project(self):
+        state = SimpleNamespace(
+            run_on_all_nodes=False,
+            can_run_on_all_clients=False,
+            selected_client_group="p:proj-2",
+            groups_json='[{"id": "group-1", "name": "A"}]',
+            projects_json='[{"id": "proj-1", "name": "P1"}, {"id": "proj-2", "name": "P2"}]',
+        )
+        self.assertEqual(bridge_operators._get_selected_target(state), ("", "proj-2"))
+
+    def test_legacy_bare_group_id_still_reads_as_a_group(self):
+        # A pre-1.0.10 stored enum value has no prefix — it always meant a group.
         state = SimpleNamespace(
             run_on_all_nodes=False,
             can_run_on_all_clients=False,
             selected_client_group="group-2",
             groups_json='[{"id": "group-1", "name": "A"}, {"id": "group-2", "name": "B"}]',
         )
-        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "group-2")
+        self.assertEqual(bridge_operators._get_selected_target(state), ("group-2", ""))
 
-    def test_no_groups_at_all_resolves_to_unscoped(self):
+    def test_no_targets_at_all_resolves_to_unscoped(self):
         state = SimpleNamespace(
             run_on_all_nodes=False,
             can_run_on_all_clients=False,
             selected_client_group="",
             groups_json="",
         )
-        self.assertEqual(bridge_operators._get_selected_client_group_id(state), "")
+        self.assertEqual(bridge_operators._get_selected_target(state), ("", ""))
 
 
 class BridgeOperatorPolicyTests(unittest.TestCase):

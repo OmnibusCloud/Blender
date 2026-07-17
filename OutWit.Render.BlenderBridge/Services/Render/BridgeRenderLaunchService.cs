@@ -220,6 +220,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -230,8 +231,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveStillScript(options.Engine);
 
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, frame, options);
 
             Logger.LogInformation("Bridge RenderStill launched for blob {BlobId} at frame {Frame} with job {JobId}",
@@ -258,6 +259,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             TileOptionsData tileOptions,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -269,8 +271,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveStillTiledScript(options.Engine);
 
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, tileOptions }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, tileOptions }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, frame, tilesX, tilesY, options, tileOptions);
 
             Logger.LogInformation("Bridge RenderStillTiled launched for blob {BlobId} at frame {Frame} with tiles {TilesX}x{TilesY} and job {JobId}",
@@ -297,6 +299,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -307,8 +310,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveFramesScript(options.Engine);
 
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options);
 
             Logger.LogInformation("Bridge RenderFrames launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
@@ -335,6 +338,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             VideoOptionsData video,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -346,8 +350,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scene = CreateScene(sceneBlobId, attachedFiles);
             var scriptName = ResolveVideoScript(options.Engine);
 
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, video }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, video }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options, video);
 
             Logger.LogInformation("Bridge RenderVideo launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
@@ -372,6 +376,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -383,8 +388,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var bakeOptions = CreateBakeOptions();
             var scriptName = ResolveBakeAndRenderStillScript(options.Engine);
 
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options, bakeOptions }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, options, bakeOptions }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, frame, options, bakeOptions);
 
             Logger.LogInformation("Bridge BakeAndRenderStill launched for blob {BlobId} at frame {Frame} with job {JobId}",
@@ -411,6 +416,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             TileOptionsData tileOptions,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -424,8 +430,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scriptName = ResolveBakeAndRenderStillTiledScript(options.Engine);
 
             // Arg order matches the .wit signature: (scene, frame, tilesX, tilesY, options, bakeOptions, tileOptions).
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, bakeOptions, tileOptions }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, frame, tilesX, tilesY, options, bakeOptions, tileOptions }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, frame, tilesX, tilesY, options, bakeOptions, tileOptions);
 
             Logger.LogInformation("Bridge BakeAndRenderStillTiled launched for blob {BlobId} at frame {Frame} with tiles {TilesX}x{TilesY} and job {JobId}",
@@ -452,6 +458,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderOptionsData options,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -463,8 +470,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var bakeOptions = CreateBakeOptions();
             var scriptName = ResolveBakeAndRenderFramesScript(options.Engine);
 
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, bakeOptions }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, bakeOptions }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options, bakeOptions);
 
             Logger.LogInformation("Bridge BakeAndRenderFrames launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
@@ -491,6 +498,7 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             VideoOptionsData video,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
             Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -504,8 +512,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             var scriptName = ResolveBakeAndRenderVideoScript(options.Engine);
 
             // Arg order matches the .wit signature: (scene, startFrame, endFrame, options, bakeOptions, video).
-            var handle = selectedClientGroupId.HasValue
-                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, bakeOptions, video }, selectedClientGroupId)
+            var handle = HasScopedTarget(selectedClientGroupId, selectedProjectId)
+                ? await client.Scripts.SubmitAsync(scriptName, new object?[] { scene, startFrame, endFrame, options, bakeOptions, video }, selectedClientGroupId, selectedProjectId)
                 : await client.Scripts.RunAsync(scriptName, scene, startFrame, endFrame, options, bakeOptions, video);
 
             Logger.LogInformation("Bridge BakeAndRenderVideo launched for blob {BlobId} at range {StartFrame}-{EndFrame} with job {JobId}",
@@ -571,6 +579,16 @@ namespace OutWit.Render.BlenderBridge.Services.Render
         {
             if (sceneBlobId == Guid.Empty)
                 throw new InvalidOperationException("Scene blob id is required.");
+        }
+
+        // The engine rejects a submit that names both scopes; failing here keeps the error local and
+        // instant instead of a round-trip. No target at all = the unscoped all-clients run.
+        private static bool HasScopedTarget(Guid? selectedClientGroupId, Guid? selectedProjectId)
+        {
+            if (selectedClientGroupId.HasValue && selectedProjectId.HasValue)
+                throw new InvalidOperationException("A launch may target a client group or a project, not both.");
+
+            return selectedClientGroupId.HasValue || selectedProjectId.HasValue;
         }
 
         private static string FormatAvailableRenderBackends(RenderRuntimeDiagnosticsData runtimeDiagnostics)

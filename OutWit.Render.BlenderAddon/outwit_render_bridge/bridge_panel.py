@@ -26,7 +26,7 @@ from .bridge_launcher import note_panel_visible
 from .bridge_engine_routing import scene_frame_count
 from .bridge_status import (
     Phase,
-    authorized_group_count,
+    authorized_target_count,
     compute_status,
     connection_icon_key,
     first_non_empty,
@@ -476,9 +476,10 @@ def _draw_output(layout, context, state, view) -> None:
 
 
 def _draw_target(layout, state) -> None:
-    """Target = a specific GROUP (dropdown). 'Run on all nodes' is a separate checkbox, shown only when
-    the account is allowed to; when it is checked the group dropdown is disabled. With no authorized
-    groups the dropdown is hidden — the checkbox is then the only target."""
+    """Target = a specific PROJECT or GROUP (unified dropdown, projects first). 'Run on all nodes' is
+    a separate checkbox, shown only when the account is allowed to; when it is checked the dropdown
+    is disabled. With no targets the dropdown is hidden — the checkbox is then the only target (or,
+    without that right, compute_status blocks Render with NO_ELIGIBLE_TARGET)."""
     if not state.is_signed_in:
         return
 
@@ -486,7 +487,7 @@ def _draw_target(layout, state) -> None:
     if state.can_run_on_all_clients:
         col.prop(state, "run_on_all_nodes")
 
-    if authorized_group_count(state) > 0:
+    if authorized_target_count(state) > 0:
         row = col.row()
         row.enabled = not (state.can_run_on_all_clients and state.run_on_all_nodes)
         row.prop(state, "selected_client_group")
