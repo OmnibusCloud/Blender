@@ -221,6 +221,24 @@ def _get_selected_target_unified_id(state) -> str:
     return ""
 
 
+# Blender renders operator ERROR reports as a popup sized to the TEXT — a multi-clause server
+# message becomes a screen-wide banner. The popup gets one readable sentence; the full text
+# stays in state.last_error, which the panel shows with the Copy button.
+_ERROR_POPUP_LIMIT = 160
+
+
+def _short_error_message(error: BaseException) -> str:
+    message = str(error).strip() or "Render launch failed."
+    # The engine wraps the human sentence in transport prefixes ("Failed to process request:
+    # One or more errors occurred. (...)") — surface the innermost parenthesised clause.
+    match = re.search(r"\(([^()]+)\)\s*$", message)
+    if match:
+        message = match.group(1).strip()
+    if len(message) > _ERROR_POPUP_LIMIT:
+        message = message[:_ERROR_POPUP_LIMIT - 1].rstrip() + "…"
+    return message
+
+
 def _get_runtime_state(context):
     return context.window_manager.outwit_bridge_state
 
@@ -693,10 +711,19 @@ def _merge_unique_summaries(*summaries: str) -> str:
 
 
 def _run_validate_blend(context):
+    # Validate carries the SAME target scope as the render: an unscoped utility submit is an
+    # all-clients submit the engine rejects for non-admin accounts — the whole launch then died
+    # right here with "not authorized to launch on all clients" (live-found, first non-admin run).
     state = _get_runtime_state(context)
     context_directory = _get_context_directory(context)
     client = BridgeClient(context_directory)
-    response = client.run_render_validate_blend(_ensure_uploaded_blob_id(state), _get_uploaded_attachment_manifest(state))
+    group_id, project_id = _get_selected_target(state)
+    response = client.run_render_validate_blend(
+        _ensure_uploaded_blob_id(state),
+        _get_uploaded_attachment_manifest(state),
+        group_id,
+        project_id,
+    )
     _apply_validate_response(state, response)
     return response
 
@@ -705,6 +732,7 @@ def _run_preflight(context):
     state = _get_runtime_state(context)
     scene = context.scene
     client = _get_bridge_client(context)
+    group_id, project_id = _get_selected_target(state)
     response = client.run_render_preflight(
         _get_still_frame(context),
         int(scene.frame_start),
@@ -714,6 +742,8 @@ def _run_preflight(context):
         _collect_render_options(context),
         _collect_tile_options(state),
         _collect_video_options(state),
+        group_id,
+        project_id,
     )
     _apply_preflight_response(state, response)
     return response
@@ -2699,13 +2729,13 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             return {"FINISHED"}
         except BridgeClientError as ex:
             state.last_error = str(ex)
-            state.status_message = str(ex)
-            self.report({"ERROR"}, str(ex))
+            state.status_message = _short_error_message(ex)
+            self.report({"ERROR"}, _short_error_message(ex))
             return {"CANCELLED"}
         except Exception as ex:
             state.last_error = str(ex)
             state.status_message = "Render launch failed."
-            self.report({"ERROR"}, str(ex))
+            self.report({"ERROR"}, _short_error_message(ex))
             return {"CANCELLED"}
         finally:
             _launch_in_progress = False

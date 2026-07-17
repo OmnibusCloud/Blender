@@ -63,6 +63,23 @@ class BridgeClientError(Exception):
     pass
 
 
+def _extract_http_error_message(status_code: int, detail: str) -> str:
+    """The human message from a bridge HTTP error body.
+
+    The bridge answers errors with a JSON envelope ({"Status", "Data", "ErrorMessage",
+    "ErrorDetails"}); showing the raw body gave the artist a screen-wide JSON dump for what is
+    one sentence of ErrorMessage. Unparseable bodies keep the old raw form.
+    """
+    try:
+        envelope = json.loads(detail)
+        message = str(envelope.get("ErrorMessage") or "").strip()
+        if message:
+            return message
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return f"Bridge HTTP error {status_code}: {detail}"
+
+
 class BridgeClient:
     def __init__(self, context_directory: str):
         self._context_directory = context_directory
@@ -135,7 +152,23 @@ class BridgeClient:
 
         raise BridgeClientError(status.error or f"Upload did not complete (status: {status.status or 'unknown'}).")
 
-    def run_render_validate_blend(self, scene_blob_id: str, attached_files: list[dict[str, Any]] | None = None) -> RenderValidateBlendResponse:
+    def run_render_validate_blend(
+        self,
+        scene_blob_id: str,
+        attached_files: list[dict[str, Any]] | None = None,
+        selected_client_group_id: str = "",
+        selected_project_id: str = "",
+    ) -> RenderValidateBlendResponse:
+        """Validation must carry the SAME scope as the render: an unscoped utility submit is an
+        all-clients submit, which the engine rejects for non-admin accounts — the launch then dies
+        here before the correctly-scoped render is ever reached (live-found on the first non-admin
+        self-serve run). Unscoped stays on the legacy method for older running bridges."""
+        group_id = (selected_client_group_id or "").strip()
+        project_id = (selected_project_id or "").strip()
+        if group_id or project_id:
+            return self._post(
+                "RunRenderValidateBlendScopedAsync", RenderValidateBlendResponse.from_json,
+                scene_blob_id, attached_files or [], group_id, project_id)
         return self._post("RunRenderValidateBlendAsync", RenderValidateBlendResponse.from_json, scene_blob_id, attached_files or [])
 
     def run_render_preflight(
@@ -148,19 +181,17 @@ class BridgeClient:
         options: dict[str, Any],
         tile_options: dict[str, Any],
         video: dict[str, Any],
+        selected_client_group_id: str = "",
+        selected_project_id: str = "",
     ) -> RenderPreflightResponse:
-        return self._post(
-            "RunRenderPreflightAsync",
-            RenderPreflightResponse.from_json,
-            frame,
-            start_frame,
-            end_frame,
-            tiles_x,
-            tiles_y,
-            options,
-            tile_options,
-            video,
-        )
+        group_id = (selected_client_group_id or "").strip()
+        project_id = (selected_project_id or "").strip()
+        payload = [frame, start_frame, end_frame, tiles_x, tiles_y, options, tile_options, video]
+        if group_id or project_id:
+            return self._post(
+                "RunRenderPreflightScopedAsync", RenderPreflightResponse.from_json,
+                *payload, group_id, project_id)
+        return self._post("RunRenderPreflightAsync", RenderPreflightResponse.from_json, *payload)
 
     def run_render_still(self, scene_blob_id: str, frame: int, options: dict[str, Any], attached_files: list[dict[str, Any]] | None = None, selected_client_group_id: str = "", selected_project_id: str = "") -> RunRenderResponse:
         payload = [scene_blob_id, frame, options, attached_files or []]
@@ -337,7 +368,7 @@ class BridgeClient:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as ex:
             detail = ex.read().decode("utf-8", errors="replace")
-            raise BridgeClientError(f"Bridge HTTP error {ex.code}: {detail}") from ex
+            raise BridgeClientError(_extract_http_error_message(ex.code, detail)) from ex
         except urllib.error.URLError as ex:
             raise BridgeClientError(f"Bridge request failed: {ex.reason}") from ex
 

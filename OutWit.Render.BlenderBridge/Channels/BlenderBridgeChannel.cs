@@ -153,6 +153,51 @@ namespace OutWit.Render.BlenderBridge.Channels
                 video);
         }
 
+        public Task<RenderValidateBlendResponse> RunRenderValidateBlendScopedAsync(
+            Guid sceneBlobId,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            string selectedClientGroupId,
+            string selectedProjectId)
+        {
+            return RenderLaunchService.RunRenderValidateBlendAsync(
+                sceneBlobId,
+                attachedFiles,
+                ParseScopeId(selectedClientGroupId),
+                ParseScopeId(selectedProjectId));
+        }
+
+        public Task<RenderPreflightResponse> RunRenderPreflightScopedAsync(
+            int frame,
+            int startFrame,
+            int endFrame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            VideoOptionsData video,
+            string selectedClientGroupId,
+            string selectedProjectId)
+        {
+            return RenderLaunchService.RunRenderPreflightAsync(
+                frame,
+                startFrame,
+                endFrame,
+                tilesX,
+                tilesY,
+                options,
+                tileOptions,
+                video,
+                ParseScopeId(selectedClientGroupId),
+                ParseScopeId(selectedProjectId));
+        }
+
+        // "" / whitespace / unparseable / Guid.Empty all mean "no scope of this kind" — the string
+        // transport exists so one method covers group/project/none (REST binds by name + count).
+        private static Guid? ParseScopeId(string? value)
+        {
+            return Guid.TryParse((value ?? "").Trim(), out var id) && id != Guid.Empty ? id : null;
+        }
+
         public Task<RunRenderStillResponse> RunRenderStillAsync(Guid sceneBlobId, int frame, RenderOptionsData options)
         {
             return RenderLaunchService.RunRenderStillAsync(sceneBlobId, frame, options);

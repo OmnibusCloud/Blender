@@ -77,12 +77,14 @@ namespace OutWit.Render.BlenderBridge.Services.Render
 
         public async Task<RenderValidateBlendResponse> RunRenderValidateBlendAsync(Guid sceneBlobId, CancellationToken cancellationToken = default)
         {
-            return await RunRenderValidateBlendAsync(sceneBlobId, null, cancellationToken);
+            return await RunRenderValidateBlendAsync(sceneBlobId, null, cancellationToken: cancellationToken);
         }
 
         public async Task<RenderValidateBlendResponse> RunRenderValidateBlendAsync(
             Guid sceneBlobId,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles,
+            Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfSceneBlobIdMissing(sceneBlobId);
@@ -93,7 +95,13 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(DEFAULT_TIMEOUT);
 
-            var handle = await client.Scripts.RunAsync(RENDER_VALIDATE_BLEND_SCRIPT, scene);
+            // Scoped like the render itself: an unscoped utility submit is an ALL-CLIENTS submit,
+            // which the engine (rightly) rejects for accounts without the global grant — validation
+            // then fails before the correctly-scoped render is ever reached (live-found on the
+            // first non-admin self-serve run). HasScopedTarget also rejects group+project both set.
+            _ = HasScopedTarget(selectedClientGroupId, selectedProjectId);
+            var handle = await client.Scripts.SubmitAsync(
+                RENDER_VALIDATE_BLEND_SCRIPT, new object?[] { scene }, selectedClientGroupId, selectedProjectId, ct: cancellationToken);
             var waited = await handle.WaitAsync<string>("result", pollInterval: POLL_INTERVAL, ct: timeoutSource.Token);
 
             if (waited.Status == ProcessingJobStatus.Completed)
@@ -141,6 +149,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render
             RenderOptionsData options,
             TileOptionsData tileOptions,
             VideoOptionsData video,
+            Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(options);
@@ -149,9 +159,13 @@ namespace OutWit.Render.BlenderBridge.Services.Render
 
             var client = await GetRequiredClientAsync(cancellationToken);
 
+            // Scoped like the render itself (see RunRenderValidateBlendAsync) — an unscoped
+            // preflight is an all-clients submit a non-admin account cannot make.
+            _ = HasScopedTarget(selectedClientGroupId, selectedProjectId);
+
             var runtimeDiagnostics = await RunAndGetResultAsync<RenderRuntimeDiagnosticsData>(
                 client,
-                s => s.RunAsync(RENDER_RUNTIME_DIAGNOSTICS_SCRIPT),
+                s => s.SubmitAsync(RENDER_RUNTIME_DIAGNOSTICS_SCRIPT, [], selectedClientGroupId, selectedProjectId),
                 "Bridge runtime diagnostics",
                 cancellationToken);
 
@@ -167,22 +181,22 @@ namespace OutWit.Render.BlenderBridge.Services.Render
                 RuntimeDiagnostics = runtimeDiagnostics,
                 Still = await RunAndGetResultAsync<RenderPreflightFramesData>(
                     client,
-                    s => s.RunAsync(RENDER_PREFLIGHT_STILL_SCRIPT, frame, options),
+                    s => s.SubmitAsync(RENDER_PREFLIGHT_STILL_SCRIPT, new object?[] { frame, options }, selectedClientGroupId, selectedProjectId),
                     "Bridge still preflight",
                     cancellationToken),
                 Frames = await RunAndGetResultAsync<RenderPreflightFramesData>(
                     client,
-                    s => s.RunAsync(RENDER_PREFLIGHT_FRAMES_SCRIPT, startFrame, endFrame, options),
+                    s => s.SubmitAsync(RENDER_PREFLIGHT_FRAMES_SCRIPT, new object?[] { startFrame, endFrame, options }, selectedClientGroupId, selectedProjectId),
                     "Bridge frame-range preflight",
                     cancellationToken),
                 StillTiled = await RunAndGetResultAsync<RenderPreflightStillTiledData>(
                     client,
-                    s => s.RunAsync(RENDER_PREFLIGHT_STILL_TILED_SCRIPT, tilesX, tilesY, options, tileOptions),
+                    s => s.SubmitAsync(RENDER_PREFLIGHT_STILL_TILED_SCRIPT, new object?[] { tilesX, tilesY, options, tileOptions }, selectedClientGroupId, selectedProjectId),
                     "Bridge tiled-still preflight",
                     cancellationToken),
                 Video = await RunAndGetResultAsync<RenderPreflightVideoData>(
                     client,
-                    s => s.RunAsync(RENDER_PREFLIGHT_VIDEO_SCRIPT, options, video),
+                    s => s.SubmitAsync(RENDER_PREFLIGHT_VIDEO_SCRIPT, new object?[] { options, video }, selectedClientGroupId, selectedProjectId),
                     "Bridge video preflight",
                     cancellationToken)
             };

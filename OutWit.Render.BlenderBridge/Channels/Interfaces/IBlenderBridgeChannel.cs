@@ -109,6 +109,34 @@ namespace OutWit.Render.BlenderBridge.Channels.Interfaces
             VideoOptionsData video);
 
         /// <summary>
+        /// Validates the blend scoped to the selected render target — utility submits must carry
+        /// the same scope as the render, or a non-admin account is rejected ("all clients") before
+        /// the render is ever reached. Ids travel as strings ("" = none; both set is an error) so
+        /// ONE method covers group/project/none without a Guid-arity explosion in the REST binder.
+        /// </summary>
+        Task<RenderValidateBlendResponse> RunRenderValidateBlendScopedAsync(
+            Guid sceneBlobId,
+            List<RenderSceneAttachmentRefData> attachedFiles,
+            string selectedClientGroupId,
+            string selectedProjectId);
+
+        /// <summary>
+        /// Runs the render preflight scoped to the selected render target (see
+        /// <see cref="RunRenderValidateBlendScopedAsync"/> for the string-id contract).
+        /// </summary>
+        Task<RenderPreflightResponse> RunRenderPreflightScopedAsync(
+            int frame,
+            int startFrame,
+            int endFrame,
+            int tilesX,
+            int tilesY,
+            RenderOptionsData options,
+            TileOptionsData tileOptions,
+            VideoOptionsData video,
+            string selectedClientGroupId,
+            string selectedProjectId);
+
+        /// <summary>
         /// Launches the bundled RenderStill script.
         /// </summary>
         Task<RunRenderStillResponse> RunRenderStillAsync(Guid sceneBlobId, int frame, RenderOptionsData options);

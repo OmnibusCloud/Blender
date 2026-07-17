@@ -503,6 +503,32 @@ class TargetResolutionFallbackTests(unittest.TestCase):
         self.assertEqual(bridge_operators._get_selected_target(state), ("", ""))
 
 
+class ShortErrorMessageTests(unittest.TestCase):
+    """The popup gets one readable sentence; the full text stays in the panel's Copy field."""
+
+    def test_extracts_the_innermost_parenthesised_engine_clause(self):
+        raw = ("Failed to process request: One or more errors occurred. "
+               "(Script submission failed: User 'abc' is not authorized to launch on all clients.)")
+        self.assertEqual(
+            bridge_operators._short_error_message(Exception(raw)),
+            "Script submission failed: User 'abc' is not authorized to launch on all clients.")
+
+    def test_plain_message_passes_through(self):
+        self.assertEqual(
+            bridge_operators._short_error_message(Exception("Scene not saved.")),
+            "Scene not saved.")
+
+    def test_overlong_message_is_truncated_with_ellipsis(self):
+        message = bridge_operators._short_error_message(Exception("x" * 500))
+        self.assertLessEqual(len(message), bridge_operators._ERROR_POPUP_LIMIT)
+        self.assertTrue(message.endswith("…"))
+
+    def test_empty_message_falls_back_to_a_generic_line(self):
+        self.assertEqual(
+            bridge_operators._short_error_message(Exception("")),
+            "Render launch failed.")
+
+
 class BridgeOperatorPolicyTests(unittest.TestCase):
     def test_scene_requires_upload_reuploads_after_a_saved_edit(self) -> None:
         # Regression: adding a camera (or any edit) + saving must re-upload even when the path and the

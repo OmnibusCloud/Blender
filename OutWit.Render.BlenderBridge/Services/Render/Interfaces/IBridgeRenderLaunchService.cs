@@ -9,15 +9,20 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
     public interface IBridgeRenderLaunchService
     {
         /// <summary>
-        /// Runs the bundled RenderValidateBlend script for one uploaded scene blob.
+        /// Runs the bundled RenderValidateBlend script for one uploaded scene blob. Scoped to the
+        /// selected group/project like the render itself — an unscoped submit is an all-clients
+        /// submit a non-admin account cannot make.
         /// </summary>
         Task<RenderValidateBlendResponse> RunRenderValidateBlendAsync(
             Guid sceneBlobId,
             IReadOnlyList<RenderSceneAttachmentRefData>? attachedFiles = null,
+            Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Runs the bundled render preflight diagnostics for the current packaged runtime.
+        /// Runs the bundled render preflight diagnostics for the current packaged runtime. Scoped
+        /// to the selected group/project like the render itself.
         /// </summary>
         Task<RenderPreflightResponse> RunRenderPreflightAsync(
             int frame,
@@ -28,6 +33,8 @@ namespace OutWit.Render.BlenderBridge.Services.Render.Interfaces
             RenderOptionsData options,
             TileOptionsData tileOptions,
             VideoOptionsData video,
+            Guid? selectedClientGroupId = null,
+            Guid? selectedProjectId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
