@@ -114,3 +114,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 TIER_B_LOCAL_CONTROLLER_PLAN.md
+
+# Mantaflow noise tile dropped by local bake test runs
+waveletNoiseTile.bin
