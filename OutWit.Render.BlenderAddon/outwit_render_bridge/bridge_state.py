@@ -22,7 +22,12 @@ NO_GROUP_ID = "__NONE__"
 # Blender keeps only weak references to the strings returned by a dynamic EnumProperty
 # items callback; if we build them inline they get garbage-collected and the UI shows
 # corrupted entries (or crashes). Hold a module-level reference to the last built list.
-_GROUP_ENUM_ITEMS_CACHE: list[tuple[str, str, str]] = []
+_GROUP_ENUM_ITEMS_CACHE: list[tuple] = []
+
+# Kind icons make projects and groups tell apart in the flat dropdown (colors are not a thing
+# Blender enums can do; icons render both in the open menu and on the collapsed control).
+PROJECT_TARGET_ICON = "RENDER_ANIMATION"
+GROUP_TARGET_ICON = "COMMUNITY"
 
 
 def _parse_scope_json(raw: str) -> list:
@@ -34,31 +39,35 @@ def _parse_scope_json(raw: str) -> list:
 
 def selected_target_items(self, context):
     """Builds the unified Target dropdown: the user's PROJECTS (campaigns) first, then the
-    authorized GROUPS — ids carry a ``p:``/``g:`` prefix (see bridge_status.split_target_id).
+    authorized GROUPS — ids carry a ``p:``/``g:`` prefix (see bridge_status.split_target_id),
+    and each kind carries its own icon so the flat list stays readable.
 
     'All clients / all nodes' is NOT an entry here — it is a separate checkbox (run_on_all_nodes),
     so Target always means "a specific project or group". Reads what the bridge reported for the
     signed-in user (``projects_json`` / ``groups_json``). A placeholder keeps the enum non-empty
     when there are no targets (the control is hidden/disabled in that case).
     """
-    items: list[tuple[str, str, str]] = []
+    items: list[tuple] = []
 
     for project in _parse_scope_json(self.projects_json):
         project_id = str(project.get("id", "")).strip()
         if not project_id:
             continue
         name = str(project.get("name", "")).strip() or project_id
-        items.append((project_target_id(project_id), name, f"Render into project '{name}'"))
+        items.append((project_target_id(project_id), name, f"Render into project '{name}'",
+                      PROJECT_TARGET_ICON, len(items)))
 
     for group in _parse_scope_json(self.groups_json):
         group_id = str(group.get("id", "")).strip()
         if not group_id:
             continue
         name = str(group.get("name", "")).strip() or group_id
-        items.append((group_target_id(group_id), name, f"Render on group '{name}'"))
+        items.append((group_target_id(group_id), name, f"Render on group '{name}'",
+                      GROUP_TARGET_ICON, len(items)))
 
     if not items:
-        items.append((NO_GROUP_ID, "No targets", "You have no projects or render groups to launch into"))
+        items.append((NO_GROUP_ID, "No targets",
+                      "You have no projects or render groups to launch into", "NONE", 0))
 
     _GROUP_ENUM_ITEMS_CACHE.clear()
     _GROUP_ENUM_ITEMS_CACHE.extend(items)
