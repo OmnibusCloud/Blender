@@ -2,6 +2,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OutWit.Cloud.Auth.Browser;
+using OutWit.Cloud.Auth.Callbacks;
+using OutWit.Cloud.Auth.Interfaces;
 using OutWit.Common.DependencyInjection;
 using OutWit.Common.Settings;
 using OutWit.Common.Settings.Configuration;
@@ -96,8 +99,12 @@ namespace OutWit.Render.BlenderBridge
                     SettingsScope.User)
                 .RegisterContainer<BridgeRenderSettings>());
 
-            builder.Services.AddSingletonWithInject<IBridgeSystemBrowserLauncher, BridgeSystemBrowserLauncher>();
-            builder.Services.AddSingletonWithInject<IBridgeAuthorizationCallbackListenerFactory, BridgeAuthorizationCallbackListenerFactory>();
+            // The shared OutWit.Cloud.Auth primitives the session service drives: the real system
+            // browser and the fixed loopback callback listener (ports 17892-17894, /callback) —
+            // the same stack every OmnibusCloud desktop component signs in with.
+            builder.Services.AddSingleton<Serilog.ILogger>(logger);
+            builder.Services.AddSingleton<ISystemBrowserLauncher>(new SystemBrowserLauncherShell(logger));
+            builder.Services.AddSingleton<IAuthorizationCallbackListenerFactory>(new AuthorizationCallbackListenerFactoryLoopback(logger));
             builder.Services.AddSingletonWithInject<IBridgeLocalSessionSecretService, BridgeLocalSessionSecretService>();
             builder.Services.AddSingletonWithInject<IBridgeLocalConnectionContextService, BridgeLocalConnectionContextService>();
             builder.Services.AddSingletonWithInject<Services.Hosting.Interfaces.IBridgeLeaseService, Services.Hosting.BridgeLeaseService>();

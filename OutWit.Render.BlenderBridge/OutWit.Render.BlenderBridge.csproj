@@ -16,7 +16,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.5" />
-    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.16.0" />
+    <!-- The shared WitIdentity sign-in stack (OIDC code flow + PKCE, loopback callback listener,
+         encrypted refresh-token session store) — replaces the bridge's own copies of those
+         primitives. BridgeSessionService stays as a thin adapter over the package TokenService. -->
+    <PackageReference Include="OutWit.Cloud.Auth" Version="1.0.0" />
     <PackageReference Include="OutWit.Common" Version="1.3.2" />
     <PackageReference Include="OutWit.Common.DependencyInjection" Version="1.1.*" />
     <PackageReference Include="OutWit.Common.MemoryPack" Version="1.1.4" />
@@ -30,8 +33,7 @@
     <PackageReference Include="OutWit.Communication.Server.Rest" Version="2.3.4" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.16.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.18.0" />
   </ItemGroup>
 
   <ItemGroup>

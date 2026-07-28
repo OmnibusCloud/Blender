@@ -1,25 +1,15 @@
-using OutWit.Render.BlenderBridge.Models;
+using OutWit.Cloud.Auth.Sessions;
 
 namespace OutWit.Render.BlenderBridge.Services.Auth.Interfaces
 {
     /// <summary>
-    /// Persists and loads bridge session state for simple session restore.
+    /// Exposes the shared encrypted session store the bridge persists its login session to.
     /// </summary>
     public interface IBridgeSessionStore
     {
         /// <summary>
-        /// Loads the persisted bridge session if present.
+        /// The shared OutWit.Cloud.Auth session store, bound to the bridge's per-OS-user session file.
         /// </summary>
-        Task<BridgeStoredSession?> LoadAsync(CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Persists the current bridge session.
-        /// </summary>
-        Task SaveAsync(BridgeStoredSession session, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Clears any persisted bridge session.
-        /// </summary>
-        Task ClearAsync(CancellationToken cancellationToken = default);
+        SessionStore Store { get; }
     }
 }

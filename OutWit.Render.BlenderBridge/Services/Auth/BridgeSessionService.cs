@@ -1,37 +1,35 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Microsoft.IdentityModel.Protocols;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using OutWit.Cloud.Auth;
+using OutWit.Cloud.Auth.Interfaces;
 using OutWit.Common.DependencyInjection;
 using OutWit.Render.BlenderBridge.Configuration;
 using OutWit.Render.BlenderBridge.Contracts;
 using OutWit.Render.BlenderBridge.Models;
 using OutWit.Render.BlenderBridge.Services.Auth.Interfaces;
-using OutWit.Render.BlenderBridge.Utils;
 
 namespace OutWit.Render.BlenderBridge.Services.Auth
 {
     /// <summary>
-    /// First-slice in-memory bridge session service.
+    /// Thin adapter over the shared OutWit.Cloud.Auth <see cref="OutWit.Cloud.Auth.TokenService"/>.
+    /// The package owns the OIDC machinery (discovery, PKCE, loopback callback, refresh-token
+    /// rotation and permanent-vs-transient refresh semantics, encrypted session persistence);
+    /// this class preserves the bridge's WitRPC-facing session surface for the Blender addon
+    /// and keeps the display-name / user-id JWT claim parsing adapter-local.
     /// </summary>
     public class BridgeSessionService : IBridgeSessionService
     {
         #region Constants
 
         private const string CLIENT_ID = "cloud-client";
-        private const string SCOPE = "openid profile roles offline_access";
-        private const int TOKEN_EXPIRY_BUFFER_SECONDS = 30;
-        private const int AUTH_TIMEOUT_SECONDS = 300;
+        private const SessionPolicy SESSION_POLICY = SessionPolicy.RememberUntilLogout;
+        private const string NO_SESSION_ERROR = "No active bridge user session.";
 
         #endregion
 
         #region Fields
 
-        private string? m_accessToken;
-        private DateTime m_accessTokenExpiry;
-        private string? m_refreshToken;
-        private string? m_tokenEndpoint;
+        private TokenService? m_tokenService;
         private bool m_isSignedIn;
         private string? m_displayName;
         private string? m_userId;
@@ -44,8 +42,21 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
         public BridgeSessionService(IServiceProvider services)
         {
             Services = services;
-            m_accessTokenExpiry = DateTime.MinValue;
-            m_lastError = "No active bridge user session.";
+            m_lastError = NO_SESSION_ERROR;
+        }
+
+        #endregion
+
+        #region Initialization
+
+        private TokenService CreateTokenService()
+        {
+            // The bridge keeps its historical OIDC client id ("cloud-client") — the package
+            // default ("omnibuscloud-client") belongs to the worker client.
+            var tokenService = new TokenService(AuthLogger, BrowserLauncher, CallbackListenerFactory, CLIENT_ID);
+            tokenService.RefreshTokenRotated += OnRefreshTokenRotated;
+            tokenService.ReauthenticationRequired += OnReauthenticationRequired;
+            return tokenService;
         }
 
         #endregion
@@ -54,24 +65,13 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
 
         public async Task<bool> TryRestoreSessionAsync(CancellationToken cancellationToken = default)
         {
-            var storedSession = await SessionStore.LoadAsync(cancellationToken);
-            if (storedSession == null || string.IsNullOrWhiteSpace(storedSession.RefreshToken) || string.IsNullOrWhiteSpace(storedSession.TokenEndpoint))
-                return false;
-
-            m_refreshToken = storedSession.RefreshToken;
-            m_tokenEndpoint = storedSession.TokenEndpoint;
-            m_displayName = string.IsNullOrWhiteSpace(storedSession.DisplayName) ? null : storedSession.DisplayName;
-            m_userId = string.IsNullOrWhiteSpace(storedSession.UserId) ? null : storedSession.UserId;
-
-            var restored = await RefreshTokenAsync(cancellationToken);
+            var restored = await TokenService.TryRestoreSessionAsync(SESSION_POLICY, SessionStore.Store);
             if (!restored)
-            {
-                await SessionStore.ClearAsync(cancellationToken);
-                ClearRuntimeSession();
                 return false;
-            }
 
-            await SaveCurrentSessionAsync(cancellationToken);
+            await UpdateIdentityAsync();
+            m_isSignedIn = true;
+            ClearLastError();
             Logger.LogInformation("Bridge session restored successfully.");
             return true;
         }
@@ -82,9 +82,13 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
 
             try
             {
-                var endpoints = await DiscoverEndpointsAsync(Settings.IdentityUrl, cancellationToken);
-                if (endpoints == null)
+                var succeeded = await TokenService.LoginWithBrowserAsync(Settings.IdentityUrl);
+                if (!succeeded)
                 {
+                    SetLastError(string.IsNullOrWhiteSpace(TokenService.LastInteractiveFailureText)
+                        ? "Interactive sign-in failed."
+                        : TokenService.LastInteractiveFailureText);
+
                     return new BeginSignInResponse
                     {
                         Started = false,
@@ -93,59 +97,10 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
                     };
                 }
 
-                m_tokenEndpoint = endpoints.TokenEndpoint;
+                TokenService.SaveSession(SESSION_POLICY, SessionStore.Store);
+                await UpdateIdentityAsync();
+                m_isSignedIn = true;
 
-                var codeVerifier = BridgePkceUtils.GenerateCodeVerifier();
-                var codeChallenge = BridgePkceUtils.ComputeCodeChallenge(codeVerifier);
-                var state = Guid.NewGuid().ToString("N");
-
-                using var listener = CallbackListenerFactory.Create();
-                var redirectUri = listener.TryStart();
-                if (redirectUri == null)
-                {
-                    SetLastError("Interactive authentication failed because the local loopback callback listener could not start.");
-                    return new BeginSignInResponse
-                    {
-                        Started = false,
-                        RequiresBrowser = true,
-                        Message = m_lastError
-                    };
-                }
-
-                var authorizeUrl = BuildAuthorizeUrl(endpoints.AuthorizationEndpoint, redirectUri, codeChallenge, state);
-                await BrowserLauncher.OpenAsync(authorizeUrl);
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(AUTH_TIMEOUT_SECONDS));
-
-                // After capturing the code, the listener redirects the browser to WitIdentity's
-                // shared completion page so the user sees the same branded "signed in" screen as
-                // every other native client (the worker, the 3ds Max bridge).
-                var completionUrl = $"{Settings.IdentityUrl.TrimEnd('/')}/auth/complete";
-                var code = await listener.WaitForCallbackAsync(state, completionUrl, cts.Token);
-                if (string.IsNullOrWhiteSpace(code))
-                {
-                    SetLastError("Interactive authentication timed out or was cancelled while waiting for the browser callback.");
-                    return new BeginSignInResponse
-                    {
-                        Started = false,
-                        RequiresBrowser = true,
-                        Message = m_lastError
-                    };
-                }
-
-                var exchanged = await ExchangeCodeForTokensAsync(code, redirectUri, codeVerifier, cancellationToken);
-                if (!exchanged)
-                {
-                    return new BeginSignInResponse
-                    {
-                        Started = false,
-                        RequiresBrowser = true,
-                        Message = m_lastError
-                    };
-                }
-
-                await SaveCurrentSessionAsync(cancellationToken);
                 Logger.LogInformation("Bridge sign-in completed. SignedIn={IsSignedIn}, UserId={UserId}, DisplayName={DisplayName}",
                     m_isSignedIn,
                     m_userId,
@@ -172,13 +127,14 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
             }
         }
 
-        public async Task<bool> SignOutAsync(CancellationToken cancellationToken = default)
+        public Task<bool> SignOutAsync(CancellationToken cancellationToken = default)
         {
-            await SessionStore.ClearAsync(cancellationToken);
-            ClearRuntimeSession();
-            SetLastError("No active bridge user session.");
+            // ClearSession removes the persisted session AND clears the in-memory token cache.
+            TokenService.ClearSession(SessionStore.Store);
+            ClearIdentity();
+            SetLastError(NO_SESSION_ERROR);
             Logger.LogInformation("Bridge session cleared.");
-            return true;
+            return Task.FromResult(true);
         }
 
         public Task<BridgeSessionStateSnapshot> GetSessionStateAsync(CancellationToken cancellationToken = default)
@@ -204,185 +160,24 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
 
         public async Task<string?> GetAccessTokenAsync(CancellationToken cancellationToken = default)
         {
-            if (!string.IsNullOrWhiteSpace(m_accessToken) && DateTime.UtcNow < m_accessTokenExpiry)
-                return m_accessToken;
-
-            if (!string.IsNullOrWhiteSpace(m_refreshToken) && !string.IsNullOrWhiteSpace(m_tokenEndpoint))
-            {
-                var refreshed = await RefreshTokenAsync(cancellationToken);
-                if (refreshed)
-                {
-                    await SaveCurrentSessionAsync(cancellationToken);
-                    return m_accessToken;
-                }
-            }
-
-            return null;
+            // GetTokenAsync refreshes on demand; a rotated refresh token is persisted through
+            // the RefreshTokenRotated subscription, a permanently dead one surfaces through
+            // ReauthenticationRequired.
+            var accessToken = await TokenService.GetTokenAsync();
+            return string.IsNullOrWhiteSpace(accessToken) ? null : accessToken;
         }
 
         #endregion
 
         #region Tools
 
-        private async Task<BridgeOidcEndpoints?> DiscoverEndpointsAsync(string identityUrl, CancellationToken cancellationToken)
+        private async Task UpdateIdentityAsync()
         {
-            try
-            {
-                var discoveryUrl = $"{identityUrl.TrimEnd('/')}/.well-known/openid-configuration";
-                var requireHttps = identityUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-
-                var configManager = new ConfigurationManager<OpenIdConnectConfiguration>(
-                    discoveryUrl,
-                    new OpenIdConnectConfigurationRetriever(),
-                    new HttpDocumentRetriever
-                    {
-                        RequireHttps = requireHttps
-                    });
-
-                var config = await configManager.GetConfigurationAsync(cancellationToken);
-                if (string.IsNullOrWhiteSpace(config.TokenEndpoint) || string.IsNullOrWhiteSpace(config.AuthorizationEndpoint))
-                {
-                    SetLastError("Identity discovery succeeded but the required authorization/token endpoints were missing.");
-                    return null;
-                }
-
-                return new BridgeOidcEndpoints
-                {
-                    TokenEndpoint = config.TokenEndpoint,
-                    AuthorizationEndpoint = config.AuthorizationEndpoint
-                };
-            }
-            catch (Exception ex)
-            {
-                SetLastError($"Failed to discover identity configuration from {identityUrl.TrimEnd('/')}/.well-known/openid-configuration.");
-                Logger.LogError(ex, "Bridge OIDC discovery failed.");
-                return null;
-            }
-        }
-
-        private static string BuildAuthorizeUrl(string authorizationEndpoint, string redirectUri, string codeChallenge, string state)
-        {
-            var parameters = new Dictionary<string, string>
-            {
-                ["client_id"] = CLIENT_ID,
-                ["response_type"] = "code",
-                ["redirect_uri"] = redirectUri,
-                ["scope"] = SCOPE,
-                ["code_challenge"] = codeChallenge,
-                ["code_challenge_method"] = "S256",
-                ["state"] = state
-            };
-
-            var query = string.Join("&", parameters.Select(me => $"{Uri.EscapeDataString(me.Key)}={Uri.EscapeDataString(me.Value)}"));
-            return $"{authorizationEndpoint}?{query}";
-        }
-
-        private async Task<bool> ExchangeCodeForTokensAsync(string code, string redirectUri, string codeVerifier, CancellationToken cancellationToken)
-        {
-            try
-            {
-                using var httpClient = new HttpClient();
-                var content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["grant_type"] = "authorization_code",
-                    ["client_id"] = CLIENT_ID,
-                    ["code"] = code,
-                    ["redirect_uri"] = redirectUri,
-                    ["code_verifier"] = codeVerifier
-                });
-
-                var response = await httpClient.PostAsync(m_tokenEndpoint, content, cancellationToken);
-                if (!response.IsSuccessStatusCode)
-                {
-                    SetLastError($"Interactive authentication token exchange failed with status {(int)response.StatusCode}.");
-                    return false;
-                }
-
-                var json = await response.Content.ReadAsStringAsync(cancellationToken);
-                var tokenResponse = JsonSerializer.Deserialize<JsonElement>(json);
-
-                m_accessToken = tokenResponse.GetProperty("access_token").GetString();
-                m_refreshToken = tokenResponse.TryGetProperty("refresh_token", out var refreshProp)
-                    ? refreshProp.GetString()
-                    : null;
-
-                var expiresIn = tokenResponse.GetProperty("expires_in").GetInt32();
-                m_accessTokenExpiry = DateTime.UtcNow.AddSeconds(expiresIn - TOKEN_EXPIRY_BUFFER_SECONDS);
-                UpdateIdentityFromAccessToken();
-                m_isSignedIn = !string.IsNullOrWhiteSpace(m_accessToken);
-                ClearLastError();
-                return m_isSignedIn;
-            }
-            catch (Exception ex)
-            {
-                SetLastError("Interactive authentication token exchange failed unexpectedly.");
-                Logger.LogError(ex, "Bridge token exchange failed.");
-                return false;
-            }
-        }
-
-        private async Task<bool> RefreshTokenAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                using var httpClient = new HttpClient();
-                var content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["grant_type"] = "refresh_token",
-                    ["client_id"] = CLIENT_ID,
-                    ["refresh_token"] = m_refreshToken!
-                });
-
-                var response = await httpClient.PostAsync(m_tokenEndpoint, content, cancellationToken);
-                if (!response.IsSuccessStatusCode)
-                {
-                    SetLastError($"Bridge token refresh failed with status {(int)response.StatusCode}.");
-                    return false;
-                }
-
-                var json = await response.Content.ReadAsStringAsync(cancellationToken);
-                var tokenResponse = JsonSerializer.Deserialize<JsonElement>(json);
-                m_accessToken = tokenResponse.GetProperty("access_token").GetString();
-
-                if (tokenResponse.TryGetProperty("refresh_token", out var refreshProp))
-                    m_refreshToken = refreshProp.GetString();
-
-                var expiresIn = tokenResponse.GetProperty("expires_in").GetInt32();
-                m_accessTokenExpiry = DateTime.UtcNow.AddSeconds(expiresIn - TOKEN_EXPIRY_BUFFER_SECONDS);
-                UpdateIdentityFromAccessToken();
-                m_isSignedIn = !string.IsNullOrWhiteSpace(m_accessToken);
-                ClearLastError();
-                return m_isSignedIn;
-            }
-            catch (Exception ex)
-            {
-                SetLastError("Bridge token refresh failed unexpectedly.");
-                Logger.LogError(ex, "Bridge token refresh failed.");
-                return false;
-            }
-        }
-
-        private async Task SaveCurrentSessionAsync(CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrWhiteSpace(m_refreshToken) || string.IsNullOrWhiteSpace(m_tokenEndpoint))
+            var accessToken = await TokenService.GetTokenAsync();
+            if (string.IsNullOrWhiteSpace(accessToken))
                 return;
 
-            await SessionStore.SaveAsync(new BridgeStoredSession
-            {
-                RefreshToken = m_refreshToken,
-                TokenEndpoint = m_tokenEndpoint,
-                DisplayName = m_displayName ?? string.Empty,
-                UserId = m_userId ?? string.Empty,
-                LastLoginUtc = DateTime.UtcNow.ToString("O")
-            }, cancellationToken);
-        }
-
-        private void UpdateIdentityFromAccessToken()
-        {
-            if (string.IsNullOrWhiteSpace(m_accessToken))
-                return;
-
-            var token = new JwtSecurityTokenHandler().ReadJwtToken(m_accessToken);
+            var token = new JwtSecurityTokenHandler().ReadJwtToken(accessToken);
             m_userId = token.Claims.FirstOrDefault(me => me.Type == "sub")?.Value;
             m_displayName = token.Claims.FirstOrDefault(me => me.Type == "name")?.Value
                 ?? token.Claims.FirstOrDefault(me => me.Type == "preferred_username")?.Value
@@ -390,12 +185,8 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
                 ?? m_userId;
         }
 
-        private void ClearRuntimeSession()
+        private void ClearIdentity()
         {
-            m_accessToken = null;
-            m_refreshToken = null;
-            m_tokenEndpoint = null;
-            m_accessTokenExpiry = DateTime.MinValue;
             m_isSignedIn = false;
             m_displayName = null;
             m_userId = null;
@@ -413,21 +204,48 @@ namespace OutWit.Render.BlenderBridge.Services.Auth
 
         #endregion
 
+        #region Event Handlers
+
+        private void OnRefreshTokenRotated()
+        {
+            // Without persisting the rotated token, the next bridge start would attempt the
+            // now-revoked previous one and fall back to interactive login.
+            TokenService.SaveSession(SESSION_POLICY, SessionStore.Store);
+        }
+
+        private void OnReauthenticationRequired()
+        {
+            // The refresh token is permanently dead (expired / revoked). Drop the persisted
+            // session too, so the next start goes straight to interactive login instead of
+            // retrying a dead credential.
+            SessionStore.Store.Clear();
+            ClearIdentity();
+            SetLastError("Bridge session expired or was revoked; interactive sign-in is required.");
+            Logger.LogWarning("Bridge session requires interactive re-authentication.");
+        }
+
+        #endregion
+
         #region Properties
 
         protected IServiceProvider Services { get; }
+
+        private TokenService TokenService => m_tokenService ??= CreateTokenService();
 
         [Inject]
         public BridgeSettings Settings { get; set; } = null!;
 
         [Inject]
-        public IBridgeSystemBrowserLauncher BrowserLauncher { get; set; } = null!;
+        public ISystemBrowserLauncher BrowserLauncher { get; set; } = null!;
 
         [Inject]
-        public IBridgeAuthorizationCallbackListenerFactory CallbackListenerFactory { get; set; } = null!;
+        public IAuthorizationCallbackListenerFactory CallbackListenerFactory { get; set; } = null!;
 
         [Inject]
         public IBridgeSessionStore SessionStore { get; set; } = null!;
+
+        [Inject]
+        public Serilog.ILogger AuthLogger { get; set; } = null!;
 
         [Inject]
         public ILogger<BridgeSessionService> Logger { get; set; } = null!;

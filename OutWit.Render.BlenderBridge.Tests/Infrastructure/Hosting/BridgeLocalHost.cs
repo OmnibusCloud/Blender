@@ -1,6 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OutWit.Cloud.Auth.Browser;
+using OutWit.Cloud.Auth.Callbacks;
+using OutWit.Cloud.Auth.Interfaces;
 using OutWit.Common.DependencyInjection;
 using OutWit.Common.Settings;
 using OutWit.Common.Settings.Configuration;
@@ -17,7 +20,6 @@ using OutWit.Render.BlenderBridge.Services.Hosting;
 using OutWit.Render.BlenderBridge.Services.Hosting.Interfaces;
 using OutWit.Render.BlenderBridge.Services.Render;
 using OutWit.Render.BlenderBridge.Services.Render.Interfaces;
-using OutWit.Render.BlenderBridge.Tests.Infrastructure.Auth;
 using OutWit.Render.BlenderBridge.Utils;
 
 namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
@@ -66,8 +68,12 @@ namespace OutWit.Render.BlenderBridge.Tests.Infrastructure.Hosting
                     BridgeUserStorageUtils.ResolveUserDataFilePath(settings, "render-settings.json"),
                     SettingsScope.User)
                 .RegisterContainer<BridgeRenderSettings>());
-            builder.Services.AddSingletonWithInject<IBridgeSystemBrowserLauncher, BridgeHttpGetBrowserLauncher>();
-            builder.Services.AddSingletonWithInject<IBridgeAuthorizationCallbackListenerFactory, BridgeAuthorizationCallbackListenerFactory>();
+            // Mirrors Program.cs, with the package's headless HTTP-GET launcher standing in for
+            // the real system browser (no UI in tests).
+            var authLogger = Serilog.Core.Logger.None;
+            builder.Services.AddSingleton<Serilog.ILogger>(authLogger);
+            builder.Services.AddSingleton<ISystemBrowserLauncher>(new SystemBrowserLauncherHttpGet(authLogger));
+            builder.Services.AddSingleton<IAuthorizationCallbackListenerFactory>(new AuthorizationCallbackListenerFactoryLoopback(authLogger));
             builder.Services.AddSingletonWithInject<IBridgeLocalSessionSecretService, BridgeLocalSessionSecretService>();
             builder.Services.AddSingletonWithInject<IBridgeLocalConnectionContextService, BridgeLocalConnectionContextService>();
             builder.Services.AddSingletonWithInject<IBridgeLeaseService, BridgeLeaseService>();
