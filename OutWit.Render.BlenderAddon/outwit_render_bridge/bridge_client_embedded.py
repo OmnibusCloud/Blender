@@ -23,6 +23,10 @@ Behaviour worth stating:
 - Validate and preflight keep the bridge's submit-and-wait shape (five
   submits for preflight); the results come back through the document door as
   value documents of the published render vocabulary.
+- Results follow the manifest the door publishes: a completed job's
+  ``result`` variable is one asset id (still, tiled still, video) or the list
+  of a frame set; each asset is fetched with the SDK's asset download, one
+  after another, into ``<download directory>/<job id>/``.
 - Render settings persist in a small JSON file next to the session store —
   the same per-user location the bridge used — until they move to addon
   preferences (05, section 7.4).
@@ -106,6 +110,37 @@ class _Transfer:
     target_path: str = ""
 
 
+@dataclass
+class _ResultItem:
+    """One asset of a job result: named by the server, staged as ``.partial`` until complete."""
+
+    asset_id: str
+    file_name: str
+    size: int
+    target_path: str
+    partial_path: str
+    completed: bool = False
+
+
+@dataclass
+class _ResultDownload:
+    """A job's result manifest being fetched item by item; ``operation`` is the transfer in flight."""
+
+    job_id: str
+    directory: str
+    items: list[_ResultItem]
+    index: int = 0
+    operation: int | None = None
+    status: str = "InProgress"
+    error: str | None = None
+    result: DownloadResultResponse | None = None
+    cancel_requested: bool = False
+
+    @property
+    def current(self) -> _ResultItem | None:
+        return self.items[self.index] if self.index < len(self.items) else None
+
+
 class EmbeddedBridgeClient:
     """``BridgeClient`` over ``pyoc`` — one native client per addon process.
 
@@ -145,7 +180,8 @@ class EmbeddedBridgeClient:
         self._pending_login: int | None = None
         self._pending_connect: int | None = None
         self._transfers: dict[int, _Transfer] = {}
-        self._downloads_by_job: dict[str, int] = {}
+        self._downloads: dict[str, _ResultDownload] = {}
+        self._results_by_job: dict[str, list[str]] = {}
         self._session_restored_tried = False
 
         if self._session_store_path and self._remember_sign_in:
@@ -397,6 +433,9 @@ class EmbeddedBridgeClient:
             self._ensure_connected()
             job = self._wait(self._client.job_get(job_id), "job status")["job"]
             status = str(job.get("status") or "")
+            # The panel treats Completed-without-result as "finalizing" and keeps polling — the
+            # same finalize race the bridge exposed through ResultBlobId(s).
+            asset_ids = self._result_asset_ids(job_id) if status == "Completed" else []
             return GetJobResponse(
                 job_id=str(job.get("jobId") or job_id),
                 script_name=str(job.get("scriptName") or ""),
@@ -404,6 +443,8 @@ class EmbeddedBridgeClient:
                 overall_progress=float(job.get("progress") or 0.0),
                 distributed_progress=float(job.get("progress") or 0.0),
                 is_completed=status in _TERMINAL_JOB_STATES,
+                result_blob_id=asset_ids[0] if len(asset_ids) == 1 else None,
+                result_blob_ids=list(asset_ids),
                 error_message=job.get("errorMessage"),
             )
 
@@ -419,50 +460,71 @@ class EmbeddedBridgeClient:
     def download_result(self, job_id: str) -> DownloadResultResponse:
         with self._lock:
             self.start_download_result(job_id)
-            transfer = self._transfers[self._downloads_by_job[job_id]]
+            download = self._downloads[job_id]
         while True:
             with self._lock:
                 self._pump()
-                if transfer.status != "InProgress":
+                if download.status != "InProgress":
                     break
             time.sleep(0.2)
-        if transfer.status != "Completed":
-            raise EmbeddedClientError(transfer.error or "Result download did not complete.")
-        return self._download_response(job_id, transfer)
+        if download.status != "Completed" or download.result is None:
+            raise EmbeddedClientError(download.error or "Result download did not complete.")
+        return download.result
 
     def start_download_result(self, job_id: str) -> DownloadStatusResponse:
         with self._lock:
             self._ensure_connected()
-            existing = self._downloads_by_job.get(job_id)
-            if existing is not None and self._transfers[existing].status == "InProgress":
-                return self._download_status(self._transfers[existing])
+            existing = self._downloads.get(job_id)
+            if existing is not None:
+                # Re-request while running joins the active download; a completed one whose files
+                # are still on disk is served as-is. Failed / cancelled / deleted-files start over.
+                if existing.status == "InProgress" or (
+                    existing.status == "Completed" and all(os.path.isfile(item.target_path) for item in existing.items)
+                ):
+                    return self._download_status(existing)
+                del self._downloads[job_id]
+
+            asset_ids = self._result_asset_ids(job_id)
+            if not asset_ids:
+                raise EmbeddedClientError("The job has no downloadable result yet.")
+
             directory = os.path.join(self._download_directory, job_id)
             os.makedirs(directory, exist_ok=True)
-            target = os.path.join(directory, "result.bin")
-            operation = self._client.job_download_result(job_id, target)
-            transfer = _Transfer(operation=operation, kind="download", file_name=os.path.basename(target), target_path=target)
-            transfer.payload["jobId"] = job_id
-            self._transfers[operation] = transfer
-            self._downloads_by_job[job_id] = operation
-            return self._download_status(transfer)
+
+            # Names and sizes up front (like the bridge did): the panel shows "x / y (i/n)".
+            items: list[_ResultItem] = []
+            taken: set[str] = set()
+            for asset_id in asset_ids:
+                asset = self._wait(self._client.asset_query(asset_id), "asset query").get("asset") or {}
+                file_name = _unique_file_name(str(asset.get("fileName") or f"{asset_id}.bin"), taken)
+                target = os.path.join(directory, file_name)
+                items.append(_ResultItem(asset_id=asset_id, file_name=file_name, size=int(asset.get("size") or 0),
+                                         target_path=target, partial_path=target + ".partial"))
+
+            download = _ResultDownload(job_id=job_id, directory=directory, items=items)
+            self._downloads[job_id] = download
+            self._start_next_item(download)
+            return self._download_status(download)
 
     def get_download_result_status(self, job_id: str) -> DownloadStatusResponse:
         with self._lock:
             self._pump()
-            operation = self._downloads_by_job.get(job_id)
-            if operation is None:
+            download = self._downloads.get(job_id)
+            if download is None:
                 return DownloadStatusResponse(job_id=job_id, status="NotStarted")
-            return self._download_status(self._transfers[operation])
+            return self._download_status(download)
 
     def cancel_download_result(self, job_id: str) -> bool:
         with self._lock:
-            operation = self._downloads_by_job.get(job_id)
-            if operation is None:
+            download = self._downloads.get(job_id)
+            if download is None or download.status != "InProgress":
                 return False
-            try:
-                self._client.operation_cancel(operation)
-            except pyoc.OcError:
-                return False
+            download.cancel_requested = True
+            if download.operation is not None:
+                try:
+                    self._client.operation_cancel(download.operation)
+                except pyoc.OcError:
+                    return False
             return True
 
     # ------------------------------------------------------------------ #
@@ -535,9 +597,11 @@ class EmbeddedBridgeClient:
         elif event.is_completed:
             transfer.status = "Completed"
             transfer.payload.update(event.payload)
+            self._advance_result_download(transfer)
         elif event.is_failed:
             transfer.status = "Cancelled" if event.status == pyoc.OC_CANCELLED else "Failed"
             transfer.error = event.message or "Transfer failed."
+            self._advance_result_download(transfer)
 
     def _start_connect(self) -> None:
         if self._connected or self._pending_connect is not None:
@@ -652,30 +716,140 @@ class EmbeddedBridgeClient:
             error=transfer.error,
         )
 
-    def _download_status(self, transfer: _Transfer) -> DownloadStatusResponse:
-        total = transfer.total_bytes or 0
+    def _result_asset_ids(self, job_id: str) -> list[str]:
+        """The job's result manifest: the asset ids behind a completed job's ``result`` variable
+        (one uuid, or the uuid list of a frame set), cached once known. Empty while the server
+        has not stored the result yet — the finalize race the panel already rides out."""
+        cached = self._results_by_job.get(job_id)
+        if cached:
+            return cached
+        try:
+            payload = self._wait(self._client.job_get_variable(job_id, RESULT_VARIABLE), "read result")
+        except EmbeddedClientError as ex:
+            if "not published" in str(ex):
+                raise EmbeddedClientError(
+                    "This server cannot describe the job's result; multi-file results need OmnibusCloud 1.6.79 or newer.") from ex
+            return []
+        asset_ids = _asset_ids_of(payload.get("value") or {})
+        if asset_ids:
+            self._results_by_job[job_id] = asset_ids
+        return asset_ids
+
+    def _start_next_item(self, download: _ResultDownload) -> None:
+        item = download.current
+        if item is None:
+            download.operation = None
+            download.status = "Completed"
+            download.result = self._download_response(download)
+            return
+        try:
+            operation = self._client.asset_download_file(item.asset_id, item.partial_path)
+        except pyoc.OcError as ex:
+            download.status = "Failed"
+            download.error = str(ex)
+            return
+        download.operation = operation
+        transfer = _Transfer(operation=operation, kind="download", file_name=item.file_name, total_bytes=item.size,
+                             target_path=item.partial_path)
+        transfer.payload["resultJobId"] = download.job_id
+        self._transfers[operation] = transfer
+
+    def _advance_result_download(self, transfer: _Transfer) -> None:
+        job_id = transfer.payload.get("resultJobId")
+        if not job_id:
+            return
+        download = self._downloads.get(job_id)
+        if download is None or download.operation != transfer.operation:
+            return
+        item = download.current
+        if item is None:
+            return
+        if transfer.status != "Completed":
+            download.status = transfer.status
+            download.error = transfer.error
+            _remove_quietly(item.partial_path)
+            return
+        try:
+            os.replace(item.partial_path, item.target_path)
+        except OSError as ex:
+            download.status = "Failed"
+            download.error = f"Could not place {item.file_name}: {ex}"
+            return
+        item.completed = True
+        download.index += 1
+        if download.cancel_requested:
+            download.status = "Cancelled"
+            download.error = "Result download cancelled."
+            return
+        self._start_next_item(download)
+
+    def _download_status(self, download: _ResultDownload) -> DownloadStatusResponse:
+        total = sum(item.size for item in download.items)
+        downloaded = sum(item.size for item in download.items if item.completed)
+        current = download.current
+        transfer = self._transfers.get(download.operation) if download.operation is not None else None
+        if current is not None and not current.completed and transfer is not None:
+            downloaded += transfer.completed_bytes
+            if not current.size and transfer.total_bytes:
+                total += transfer.total_bytes
+        if download.status == "Completed":
+            progress = 1.0
+        else:
+            progress = min(1.0, downloaded / total) if total else 0.0
         return DownloadStatusResponse(
-            job_id=str(transfer.payload.get("jobId") or ""), status=transfer.status, total_bytes=total,
-            downloaded_bytes=transfer.completed_bytes, progress=(transfer.completed_bytes / total) if total else (1.0 if transfer.status == "Completed" else 0.0),
-            item_count=1, items_completed=1 if transfer.status == "Completed" else 0,
+            job_id=download.job_id, status=download.status, total_bytes=total, downloaded_bytes=downloaded, progress=progress,
+            item_count=len(download.items), items_completed=sum(1 for item in download.items if item.completed),
+            current_file_name=current.file_name if current is not None else "",
+            result=download.result, error=download.error,
         )
 
-    def _download_response(self, job_id: str, transfer: _Transfer) -> DownloadResultResponse:
-        asset = transfer.payload.get("asset") or {}
-        file_name = str(asset.get("fileName") or transfer.file_name)
-        final_path = transfer.target_path
-        # The SDK downloads to the requested path; give the file its server-side name for the artist.
-        wanted = os.path.join(os.path.dirname(final_path), file_name)
-        if wanted != final_path and os.path.isfile(final_path):
-            try:
-                os.replace(final_path, wanted)
-                final_path = wanted
-            except OSError:
-                pass
-        size = int(asset.get("size") or (os.path.getsize(final_path) if os.path.isfile(final_path) else 0))
-        item = DownloadedResultItemResponse(blob_id=str(asset.get("assetId") or ""), file_name=file_name, local_path=final_path, file_size=size)
-        return DownloadResultResponse(downloaded=True, job_id=job_id, blob_id=item.blob_id, file_name=file_name, local_path=final_path,
-                                      file_size=size, items=[item], message="Downloaded.")
+    def _download_response(self, download: _ResultDownload) -> DownloadResultResponse:
+        items = [
+            DownloadedResultItemResponse(
+                blob_id=item.asset_id, file_name=item.file_name, local_path=item.target_path,
+                file_size=item.size or (os.path.getsize(item.target_path) if os.path.isfile(item.target_path) else 0))
+            for item in download.items
+        ]
+        first = items[0]
+        message = "Result downloaded successfully." if len(items) == 1 else f"Result downloaded successfully ({len(items)} files)."
+        return DownloadResultResponse(downloaded=True, job_id=download.job_id, blob_id=first.blob_id, file_name=first.file_name,
+                                      local_path=first.local_path, file_size=first.file_size, items=items, message=message)
+
+
+# ---------------------------------------------------------------------- #
+# Result manifests
+# ---------------------------------------------------------------------- #
+
+def _asset_ids_of(document: dict[str, Any]) -> list[str]:
+    """Asset ids of a ``result`` value document: one ``uuid`` or a ``list`` of them (nulls skipped)."""
+    kind = document.get("kind")
+    if kind == "uuid":
+        value = document.get("value")
+        return [str(value)] if value else []
+    if kind == "list" and document.get("itemKind") == "uuid":
+        return [str(value) for value in (document.get("value") or []) if value]
+    if kind in (None, "null"):
+        return []
+    raise EmbeddedClientError(f"The job's result is not a downloadable asset (kind {kind!r}).")
+
+
+def _unique_file_name(file_name: str, taken: set[str]) -> str:
+    candidate = file_name
+    stem, extension = os.path.splitext(file_name)
+    counter = 1
+    while candidate.lower() in taken:
+        candidate = f"{stem} ({counter}){extension}"
+        counter += 1
+    taken.add(candidate.lower())
+    return candidate
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------- #

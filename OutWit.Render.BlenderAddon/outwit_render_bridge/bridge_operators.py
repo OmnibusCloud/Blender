@@ -1103,7 +1103,8 @@ def _auto_refresh_job_timer() -> float:
         _stop_job_monitor()
         try:
             _active_job_monitor = JobMonitor(
-                _get_context_directory(context), state.active_job_id, _JOB_MONITOR_INTERVAL_SECONDS
+                _get_context_directory(context), state.active_job_id, _JOB_MONITOR_INTERVAL_SECONDS,
+                client=_get_bridge_client(context),
             ).start()
             monitor = _active_job_monitor
         except Exception as ex:
@@ -2967,7 +2968,7 @@ class OUTWIT_OT_bridge_download_result(Operator):
         state.last_error = ""
         state.status_message = "Downloading result..."
 
-        self._monitor = DownloadMonitor(context_directory, state.active_job_id).start()
+        self._monitor = DownloadMonitor(context_directory, state.active_job_id, client=_get_bridge_client(context)).start()
         self._timer = context.window_manager.event_timer_add(0.25, window=context.window)
         context.window_manager.modal_handler_add(self)
         _tag_job_areas_redraw()

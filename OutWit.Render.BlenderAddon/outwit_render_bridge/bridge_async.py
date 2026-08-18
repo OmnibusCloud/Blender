@@ -68,8 +68,10 @@ class JobMonitor:
     the job reaches a terminal status.
     """
 
-    def __init__(self, context_directory: str, job_id: str, interval_seconds: float):
-        self._client = BridgeClient(context_directory)
+    def __init__(self, context_directory: str, job_id: str, interval_seconds: float, client: Optional[BridgeClient] = None):
+        # ``client`` is whatever ``_get_bridge_client`` hands out (the embedded client keeps the
+        # same surface); the default keeps the bridge-mode behaviour of one REST client per monitor.
+        self._client = client or BridgeClient(context_directory)
         self._job_id = job_id
         self._interval = max(0.5, float(interval_seconds))
         self._lock = threading.Lock()

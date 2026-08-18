@@ -81,6 +81,8 @@ class FakePyocClient:
         self.queue: list = []
         self.job_status = "Completed"
         self.variables: dict[str, dict] = {}
+        self.variable_errors: dict[str, str] = {}
+        self.assets: dict[str, dict] = {}
         self.attached_store = None
 
     # -- helpers ------------------------------------------------------------
@@ -151,6 +153,14 @@ class FakePyocClient:
         return self._op("job_cancel", job_id, completion={"job": {"jobId": job_id}})
 
     def job_get_variable(self, job_id, variable):
+        error = self.variable_errors.get(job_id)
+        if error:
+            self.calls.append(("job_get_variable", job_id, variable))
+            self.next_operation += 1
+            operation = self.next_operation
+            self.queue.append(FakeEvent(pyoc.events.OPERATION_FAILED, operation, {"status": pyoc.OC_INTERNAL_ERROR, "message": error},
+                                        status=pyoc.OC_INTERNAL_ERROR, message=error))
+            return operation
         return self._op("job_get_variable", job_id, variable, completion={"job": {"jobId": job_id}, "value": self.variables.get(job_id, {"kind": "null"})})
 
     def job_download_result(self, job_id, target):
@@ -158,6 +168,18 @@ class FakePyocClient:
         return self._op("job_download_result", job_id, target,
                         events=[FakeEvent(pyoc.events.OPERATION_PROGRESS, None, {"completedBytes": 3, "totalBytes": 3})],
                         completion={"job": {"jobId": job_id}, "asset": {"assetId": "res-1", "fileName": "still.png", "size": 3}})
+
+    def asset_query(self, asset_id):
+        asset = self.assets.get(asset_id) or {"assetId": asset_id, "fileName": f"{asset_id}.bin", "size": 3}
+        return self._op("asset_query", asset_id, completion={"asset": asset})
+
+    def asset_download_file(self, asset_id, target):
+        asset = self.assets.get(asset_id) or {"assetId": asset_id, "size": 3}
+        size = int(asset.get("size") or 3)
+        pathlib.Path(target).write_bytes(b"x" * size)
+        return self._op("asset_download_file", asset_id, target,
+                        events=[FakeEvent(pyoc.events.OPERATION_PROGRESS, None, {"completedBytes": size, "totalBytes": size})],
+                        completion={"asset": {"assetId": asset_id}})
 
     def operation_cancel(self, operation):
         self.calls.append(("operation_cancel", operation))
@@ -389,19 +411,80 @@ class TransferTests(unittest.TestCase):
     def test_download_result_lands_under_the_job_folder(self):
         with tempfile.TemporaryDirectory() as directory:
             client, fake = _signed_in_client(download_directory=directory)
+            fake.variables["job-7"] = {"kind": "uuid", "value": "res-1"}
+            fake.assets["res-1"] = {"assetId": "res-1", "fileName": "still.png", "size": 3}
             response = client.download_result("job-7")
             self.assertTrue(response.downloaded)
             self.assertEqual(response.file_name, "still.png")
             self.assertTrue(response.local_path.startswith(os.path.join(directory, "job-7")))
             self.assertTrue(os.path.isfile(response.local_path))
-            self.assertEqual(client.get_download_result_status("job-7").status, "Completed")
+            self.assertFalse(os.path.exists(response.local_path + ".partial"))
+            self.assertEqual(len(response.items), 1)
+            status = client.get_download_result_status("job-7")
+            self.assertEqual((status.status, status.item_count, status.items_completed, status.progress), ("Completed", 1, 1, 1.0))
+            self.assertIs(status.result, response)
+            self.assertNotIn("job_download_result", [c[0] for c in fake.calls], "results go asset by asset, from the manifest")
+
+    def test_frame_set_downloads_every_asset_of_the_manifest_in_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client, fake = _signed_in_client(download_directory=directory)
+            fake.variables["job-8"] = {"kind": "list", "itemKind": "uuid", "value": ["f-1", None, "f-2", "f-3"]}
+            fake.assets["f-1"] = {"assetId": "f-1", "fileName": "frame_0001.png", "size": 4}
+            fake.assets["f-2"] = {"assetId": "f-2", "fileName": "frame_0002.png", "size": 5}
+            fake.assets["f-3"] = {"assetId": "f-3", "fileName": "frame_0002.png", "size": 6}  # a name clash stays distinct on disk
+
+            job = client.get_job("job-8")
+            self.assertEqual(job.result_blob_ids, ["f-1", "f-2", "f-3"], "the manifest skips null slots")
+            self.assertIsNone(job.result_blob_id, "the single-id field is for single-asset results only")
+
+            started = client.start_download_result("job-8")
+            self.assertEqual((started.status, started.item_count, started.total_bytes), ("InProgress", 3, 15))
+            self.assertEqual(started.current_file_name, "frame_0001.png")
+
+            response = client.download_result("job-8")
+            self.assertEqual([item.file_name for item in response.items], ["frame_0001.png", "frame_0002.png", "frame_0002 (1).png"])
+            self.assertTrue(all(os.path.isfile(item.local_path) for item in response.items))
+            self.assertEqual([os.path.getsize(item.local_path) for item in response.items], [4, 5, 6])
+            self.assertEqual(response.file_name, "frame_0001.png")
+            self.assertIn("3 files", response.message)
+
+            downloads = [c for c in fake.calls if c[0] == "asset_download_file"]
+            self.assertEqual([c[1] for c in downloads], ["f-1", "f-2", "f-3"], "one after another, in frame order")
+            self.assertTrue(all(c[2].endswith(".partial") for c in downloads), "staged as .partial until complete")
+
+            status = client.get_download_result_status("job-8")
+            self.assertEqual((status.items_completed, status.downloaded_bytes, status.progress), (3, 15, 1.0))
 
     def test_get_job_maps_the_job_document(self):
         job = self.client.get_job("job-9")
         self.assertEqual(job.status, "Completed")
         self.assertTrue(job.is_completed)
         self.assertEqual(job.overall_progress, 1.0)
+        self.assertEqual(job.result_blob_ids, [], "no stored result yet: the panel shows 'finalizing' and polls on")
         self.assertTrue(self.client.cancel_job("job-9"))
+
+    def test_get_job_resolves_the_result_once_the_server_stored_it(self):
+        self.fake.variable_errors["job-10"] = "Job is not running and has no stored result"
+        self.assertEqual(self.client.get_job("job-10").result_blob_id, None)
+        del self.fake.variable_errors["job-10"]
+        self.fake.variables["job-10"] = {"kind": "uuid", "value": "res-9"}
+        job = self.client.get_job("job-10")
+        self.assertEqual((job.result_blob_id, job.result_blob_ids), ("res-9", ["res-9"]))
+        reads = [c for c in self.fake.calls if c[0] == "job_get_variable"]
+        self.client.get_job("job-10")
+        self.assertEqual(len([c for c in self.fake.calls if c[0] == "job_get_variable"]), len(reads), "the manifest is read once")
+
+    def test_get_job_names_a_server_that_cannot_describe_the_result(self):
+        self.fake.variable_errors["job-11"] = "The variable's type is not published as a document contract"
+        with self.assertRaises(embedded.EmbeddedClientError) as raised:
+            self.client.get_job("job-11")
+        self.assertIn("1.6.79", str(raised.exception))
+
+    def test_running_jobs_do_not_read_the_result(self):
+        self.fake.job_status = "Processing"
+        job = self.client.get_job("job-12")
+        self.assertEqual((job.status, job.is_completed, job.result_blob_ids), ("Processing", False, []))
+        self.assertNotIn("job_get_variable", [c[0] for c in self.fake.calls])
 
 
 class RenderSettingsTests(unittest.TestCase):
