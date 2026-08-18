@@ -49,6 +49,50 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
         update=_on_remember_render_settings_changed,
     )
 
+    # --- Embedded client (native SDK) — the migration toggle (05-blender-sdk-migration.md, 11) ---
+    use_embedded_client: BoolProperty(
+        name="Use embedded client (native SDK)",
+        description="Talk to OmnibusCloud in-process through the native SDK instead of the local bridge "
+                    "process. Takes effect on the next Blender start (the native library is loaded once "
+                    "per process)",
+        default=False,
+    )
+
+    server_url: StringProperty(
+        name="Server URL",
+        description="OmnibusCloud server base URL (embedded client). Read once per Blender session",
+        default="https://engine.omnibuscloud.com",
+    )
+
+    identity_url: StringProperty(
+        name="Identity URL",
+        description="OmnibusCloud identity (sign-in) base URL (embedded client). Read once per Blender session",
+        default="https://auth.omnibuscloud.com",
+    )
+
+    native_library_path: StringProperty(
+        name="Native Library Path",
+        description="Optional explicit path to omnibuscloud_native (.dll/.so/.dylib); empty = the library "
+                    "bundled with this package for your platform",
+        subtype="FILE_PATH",
+        default="",
+    )
+
+    download_directory: StringProperty(
+        name="Download Directory",
+        description="Where finished renders are downloaded (embedded client); empty = the per-user "
+                    "OmnibusCloud/Blender/Renders folder",
+        subtype="DIR_PATH",
+        default="",
+    )
+
+    remember_sign_in: BoolProperty(
+        name="Remember sign-in",
+        description="Keep the sign-in session on this computer (embedded client): the SDK persists its own "
+                    "session in the OS keystore; the addon stores no token material",
+        default=True,
+    )
+
     logo_variant: EnumProperty(
         name="Logo Variant",
         description="Choose the OmnibusCloud logo variant used by the addon UI",
@@ -62,11 +106,21 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="Local Bridge Discovery")
-        layout.prop(self, "bridge_context_directory")
-        layout.prop(self, "bridge_executable_path")
-        layout.prop(self, "auto_start_bridge")
-        layout.label(text="If empty, the addon also searches OUTWIT_BRIDGE_SESSION_DIR, temp/BridgeSession, and ./BridgeSession.")
+        layout.label(text="Connection")
+        layout.prop(self, "use_embedded_client")
+        if self.use_embedded_client:
+            layout.prop(self, "server_url")
+            layout.prop(self, "identity_url")
+            layout.prop(self, "native_library_path")
+            layout.prop(self, "download_directory")
+            layout.prop(self, "remember_sign_in")
+            layout.label(text="Embedded: no bridge process. URL and library changes apply after restarting Blender.")
+        else:
+            layout.label(text="Local Bridge Discovery")
+            layout.prop(self, "bridge_context_directory")
+            layout.prop(self, "bridge_executable_path")
+            layout.prop(self, "auto_start_bridge")
+            layout.label(text="If empty, the addon also searches OUTWIT_BRIDGE_SESSION_DIR, temp/BridgeSession, and ./BridgeSession.")
         layout.separator()
         layout.label(text="Settings Memory")
         layout.prop(self, "remember_render_settings")

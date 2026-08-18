@@ -27,6 +27,7 @@ from .bridge_engine_routing import (
     SceneEngineRoutingError,
     suggested_render_mode,
 )
+from .bridge_embedded import apply_embedded_state, get_embedded_client, is_embedded
 from .bridge_launcher import (
     acquire_bridge_lease,
     apply_launched_state,
@@ -244,6 +245,10 @@ def _get_runtime_state(context):
 
 
 def _get_bridge_client(context) -> BridgeClient:
+    # The migration toggle (05-blender-sdk-migration.md, 11): the embedded client keeps the
+    # BridgeClient surface, so everything above this line is transport-agnostic.
+    if is_embedded(context):
+        return get_embedded_client(context)
     ensure_bridge_running(context)
     return BridgeClient(_get_context_directory(context))
 
@@ -715,8 +720,7 @@ def _run_validate_blend(context):
     # all-clients submit the engine rejects for non-admin accounts — the whole launch then died
     # right here with "not authorized to launch on all clients" (live-found, first non-admin run).
     state = _get_runtime_state(context)
-    context_directory = _get_context_directory(context)
-    client = BridgeClient(context_directory)
+    client = _get_bridge_client(context)
     group_id, project_id = _get_selected_target(state)
     response = client.run_render_validate_blend(
         _ensure_uploaded_blob_id(state),
@@ -905,10 +909,10 @@ def _ensure_current_scene_uploaded(context):
     return None
 
 
-def _upload_worker(context_directory: str, blend_path: str, planned_attachments: list) -> dict:
+def _upload_worker(client, blend_path: str, planned_attachments: list) -> dict:
     """Runs the SLOW part of a launch off the UI thread: attachment uploads + scene pack + .blend
-    upload. No bpy access (Blender is not thread-safe) — the caller gathers all scene data first."""
-    client = BridgeClient(context_directory)
+    upload. No bpy access (Blender is not thread-safe) — the caller gathers all scene data first
+    and hands over the client it obtained on the main thread."""
     attachments = _upload_scene_attachments(client, planned_attachments)
     try:
         with create_packed_upload_copy(blend_path) as (upload_path, packed_message):
@@ -1338,6 +1342,31 @@ def _pump_session_state_sync(context) -> None:
     _session_state_synced_pid = pid
 
 
+def _pump_embedded_session(context) -> None:
+    """Embedded client: the SDK reports sign-in / connection changes as events; refresh the
+    session snapshot each heartbeat so the panel follows without a manual click (the bridge's
+    one-shot sync only ran once per bridge process)."""
+    state = _get_runtime_state(context)
+    try:
+        client = get_embedded_client(context)
+        session = client.get_session_state()
+        status = client.get_bridge_status()
+    except Exception as ex:  # noqa: BLE001 - surfaced in state; retried by the heartbeat
+        state.last_error = str(ex)
+        return
+    changed = (state.is_signed_in != session.is_signed_in) or (state.is_connected_to_cloud != status.is_connected_to_cloud)
+    state.is_signed_in = session.is_signed_in
+    state.is_connected_to_cloud = status.is_connected_to_cloud
+    state.can_launch = session.can_launch
+    if session.last_error:
+        state.last_error = session.last_error
+    if changed and session.is_signed_in and status.is_connected_to_cloud:
+        try:
+            _refresh_bridge_state(context)  # scopes become available once connected
+        except Exception as ex:  # noqa: BLE001
+            state.last_error = str(ex)
+
+
 def mark_render_settings_changed() -> None:
     """A bucket-1 preference changed in the UI → queue a push to the bridge store (the heartbeat
     pump performs the REST write, so prop update callbacks never block the UI on I/O). Suppressed
@@ -1496,13 +1525,24 @@ def _bridge_lease_timer() -> float:
     if state is None:
         return 5.0
 
-    refresh_bridge_process_state(context)
-    _pump_lazy_first_start(context)
+    embedded = is_embedded(context)
+    if embedded:
+        # In-process client: the "bridge" is this process. Fold SDK events by refreshing the
+        # session snapshot on the heartbeat; nothing to spawn, adopt or ping.
+        apply_embedded_state(state)
+    else:
+        refresh_bridge_process_state(context)
+        _pump_lazy_first_start(context)
     _pump_session_state_sync(context)
+    if embedded:
+        _pump_embedded_session(context)
     _pump_render_settings(context)
     # Repaint the panel when the connection phase changes (heartbeat-driven; replaces manual Refresh).
     _redraw_on_connection_change(state)
     interval = float(max(1, int(state.bridge_heartbeat_interval_seconds or 5)))
+
+    if embedded:
+        return interval
 
     # While a lazy launch is spawning, tick fast so its result is marshalled back promptly.
     if _lazy_launch_call is not None:
@@ -2123,12 +2163,16 @@ def _refresh_bridge_state(context) -> None:
     state = _get_runtime_state(context)
     scene = context.scene
     render = scene.render
-    ensure_bridge_running(context)
-    context_directory = _get_context_directory(context)
-    client = BridgeClient(context_directory)
+    if is_embedded(context):
+        client = get_embedded_client(context)
+        apply_embedded_state(state)
+    else:
+        ensure_bridge_running(context)
+        context_directory = _get_context_directory(context)
+        client = BridgeClient(context_directory)
 
-    bridge_context, context_path = load_latest_context(context_directory)
-    _apply_context(state, bridge_context, context_path)
+        bridge_context, context_path = load_latest_context(context_directory)
+        _apply_context(state, bridge_context, context_path)
 
     blend_path = bpy.data.filepath or ""
     state.current_blend_path = blend_path
@@ -2244,6 +2288,10 @@ class OUTWIT_OT_bridge_start(Operator):
         # auto-managing the bridge after this manual attempt.
         rearm_lazy_first_start()
         try:
+            if is_embedded(context):
+                _refresh_bridge_state(context)
+                self.report({"INFO"}, "Embedded client ready (no bridge process).")
+                return {"FINISHED"}
             launch_bridge(context)
             _refresh_bridge_state(context)
             self.report({"INFO"}, "Bridge started.")
@@ -2264,6 +2312,9 @@ class OUTWIT_OT_bridge_stop(Operator):
         state = _get_runtime_state(context)
 
         try:
+            if is_embedded(context):
+                self.report({"INFO"}, "Embedded client: there is no bridge process to stop (sign out instead).")
+                return {"CANCELLED"}
             stop_bridge(context)
             state.status_message = "Bridge stopped."
             self.report({"INFO"}, "Bridge stopped.")
@@ -2580,14 +2631,14 @@ class OUTWIT_OT_bridge_launch_render(Operator):
             return {"CANCELLED"}
 
         _apply_dependency_plan(state, planned_attachments)
-        context_directory = _get_context_directory(context)
+        client = _get_bridge_client(context)
 
         _launch_in_progress = True
         state.launch_in_progress = True
         state.last_error = ""
         state.status_message = "Uploading scene..."
         self._task = AsyncCall(
-            lambda: _upload_worker(context_directory, self._blend_path, planned_attachments)
+            lambda: _upload_worker(client, self._blend_path, planned_attachments)
         ).start()
         self._timer = context.window_manager.event_timer_add(0.2, window=context.window)
         context.window_manager.modal_handler_add(self)

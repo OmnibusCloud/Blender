@@ -44,6 +44,17 @@ def _safe_register_class(cls) -> None:
     bpy.utils.register_class(cls)
 
 
+def _embedded_client_active() -> bool:
+    """The embedded client has no bridge process to clean up (and its state carries this
+    process's PID, which the launcher cleanup must never terminate)."""
+    try:
+        from .bridge_embedded import is_embedded
+
+        return is_embedded(bpy.context)
+    except Exception:
+        return False
+
+
 def register():
     for cls in CLASSES:
         _safe_register_class(cls)
@@ -62,7 +73,8 @@ def unregister():
     # Push a pending render-preference change while the bridge is still up (the heartbeat that
     # would normally deliver it is gone now).
     flush_render_settings_on_unregister()
-    cleanup_bridge_on_unregister()
+    if not _embedded_client_active():
+        cleanup_bridge_on_unregister()
     unregister_branding()
     unregister_state()
 

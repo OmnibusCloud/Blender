@@ -36,6 +36,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from .bridge_client import BridgeClientError
 from .bridge_models import (
     AcquireLeaseResponse,
     BeginSignInResponse,
@@ -86,8 +87,8 @@ _ENGINE_SUFFIX = {0: "Cycles", 1: "Eevee", 2: "GreasePencil"}
 _TERMINAL_JOB_STATES = ("Completed", "Failed", "Cancelled", "Canceled")
 
 
-class EmbeddedClientError(Exception):
-    """Same role as ``BridgeClientError``: the message an operator shows."""
+class EmbeddedClientError(BridgeClientError):
+    """The message an operator shows; a ``BridgeClientError`` so the operators' handling is unchanged."""
 
 
 @dataclass
