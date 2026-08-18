@@ -5,15 +5,26 @@ network without leaving Blender: sign in, pick the output, press **Render** — 
 uploaded, split across the network, and the finished frames or video come back straight into
 Blender.
 
-Two cooperating components ship in a single extension zip:
+**2.0 (in progress, dev releases):** the extension talks to OmnibusCloud **in-process**
+through the OmnibusCloud native SDK — `outwit_render_bridge/vendor/pyoc` (the SDK's
+Python face, `ctypes`) over the platform's `omnibuscloud_native` library bundled in the
+zip. No companion process, no loopback REST, no lease. Sign-in (PKCE, system browser,
+token refresh, persistent session in the OS keystore) and every cloud operation live
+inside the SDK; tokens never enter Python. Every launch is one job request document of
+the published render vocabulary (`vendor/render_documents.py`, generated from the Render
+controller's model).
+
+**1.x (the shipped line):** two cooperating components in one extension zip —
 
 - **`OutWit.Render.BlenderAddon`** — a pure-Python Blender extension
-  (`outwit_render_bridge`, Blender 4.0+, no third-party Python dependencies). Adds an
+  (`outwit_render_bridge`, no third-party Python dependencies). Adds an
   **OmnibusCloud** tab to the 3D-viewport sidebar.
 - **`OutWit.Render.BlenderBridge`** — a .NET sidecar process bundled inside the zip,
-  launched and supervised by the addon. It owns the OIDC sign-in (PKCE, system browser,
-  token refresh) and all cloud communication, and serves a loopback REST API the addon
-  talks to. Tokens are encrypted at rest and never enter Blender.
+  launched and supervised by the addon. It owns the OIDC sign-in and all cloud
+  communication, and serves a loopback REST API the addon talks to.
+
+The 1.x bridge stays available, frozen, for Blender versions before 4.2; 2.0 removes the
+bridge from the package and the repository in its release commit.
 
 ---
 
@@ -196,16 +207,21 @@ public packages available to any developer.
 
 ## Build & packaging
 
-The shipped artifact is a per-platform Blender extension zip with the bridge bundled
-inside (`outwit_render_bridge/bridge/<rid>/...`):
+The shipped artifact is a per-platform Blender extension zip. For 2.0 it carries the
+native SDK library (`outwit_render_bridge/vendor/pyoc/native/<rid>/`), taken from the public
+carrier package `OutWit.Cloud.SDK.Native` on nuget.org at the version pinned in
+`outwit_render_bridge/vendor/NATIVE_VERSION`; 1.x zips carried the bridge
+(`outwit_render_bridge/bridge/<rid>/...`).
 
 - Local: [`OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1`](OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1)
+  `-RuntimeIdentifier <rid> -NoBridge [-NativeVersion 0.7.0 | -NativeLibraryPath <file>]`
   → zips in `dist/`. See the [addon README](OutWit.Render.BlenderAddon/README.md) for
   options and details.
 - CI: [`.github/workflows/addon.yml`](.github/workflows/addon.yml) — an `addon-v*` tag
-  builds all three platforms, code-signs the bundled bridge (macOS notarized, Windows
-  Authenticode), generates `SHA256SUMS` (+ GPG signature), and attaches everything to the
-  GitHub Release.
+  builds all three platforms bridge-less, code-signs the bundled native library (macOS
+  notarized, Windows Authenticode; `-dev` / `-test` / `-internal` tags are prereleases
+  and skip eSigner to save quota), generates `SHA256SUMS` (+ GPG signature), and attaches
+  everything to the GitHub Release.
 
 ---
 
