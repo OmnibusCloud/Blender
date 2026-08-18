@@ -1,15 +1,15 @@
 schema_version = "1.0.0"
 id = "omnibuscloud_render_bridge"
-version = "1.0.12"
+version = "2.0.0"
 name = "OmnibusCloud Render Bridge"
-tagline = "Thin Blender addon for the local OmnibusCloud render bridge"
+tagline = "Render on OmnibusCloud from Blender: still, tiled, animation, video, bake-and-render"
 maintainer = "OutWit"
 type = "add-on"
 website = "https://omnibuscloud.com"
-blender_version_min = "4.0.0"
+blender_version_min = "4.2.0"
 license = ["SPDX:MIT"]
 tags = ["Render"]
 
 [permissions]
-files = "Upload .blend files, download render results, and access local bridge session/cache files."
-network = "Communicate with the local OmnibusCloud bridge and the configured OmnibusCloud services."
+files = "Read the saved .blend and its dependencies for upload, write downloaded render results and the per-user session store."
+network = "Communicate with the configured OmnibusCloud services (render server and sign-in) directly from Blender."

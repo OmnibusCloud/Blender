@@ -7,7 +7,21 @@ param(
 
     [string]$BridgePublishPath = '',
 
-    [switch]$SkipBridgePublish
+    [switch]$SkipBridgePublish,
+
+    # --- Native SDK (embedded client) -------------------------------------------------------
+    # The OmnibusCloud native library the embedded client loads in-process. Sourced from the
+    # public carrier package OutWit.Cloud.SDK.Native on nuget.org (runtimes/<rid>/native/...);
+    # empty = the version pinned in outwit_render_bridge/vendor/NATIVE_VERSION. An explicit
+    # -NativeLibraryPath (a local build) wins over the download.
+    [string]$NativeVersion = '',
+
+    [string]$NativeLibraryPath = '',
+
+    # Package WITHOUT the companion bridge process: the target shape of the addon (the embedded
+    # client over the native SDK is the only transport). Bridge-less packages default the addon
+    # to the embedded client at runtime.
+    [switch]$NoBridge
 )
 
 Set-StrictMode -Version Latest
@@ -26,7 +40,7 @@ if (-not (Test-Path $packageRoot))
     throw "Blender addon package folder was not found: $packageRoot"
 }
 
-if (-not (Test-Path $bridgeProject))
+if (-not $NoBridge -and -not (Test-Path $bridgeProject))
 {
     throw "Blender bridge project was not found: $bridgeProject"
 }
@@ -75,7 +89,16 @@ $platformTag = switch ($RuntimeIdentifier)
 
 $modeFolder = if ($DeploymentMode -eq 'SelfContained') { 'self-contained' } else { 'framework-dependent' }
 $modeSuffix = if ($DeploymentMode -eq 'SelfContained') { 'selfcontained' } else { 'dotnet' }
-$zipName = "omnibuscloud-render-bridge-blender-addon-$RuntimeIdentifier-$modeSuffix-$version.zip"
+if ($NoBridge)
+{
+    # One flavour, no deployment mode: the native library is self-contained by construction.
+    $modeSuffix = 'embedded'
+    $zipName = "omnibuscloud-render-blender-addon-$RuntimeIdentifier-$version.zip"
+}
+else
+{
+    $zipName = "omnibuscloud-render-bridge-blender-addon-$RuntimeIdentifier-$modeSuffix-$version.zip"
+}
 $zipPath = Join-Path $distRoot $zipName
 $stagingVariantRoot = Join-Path $stagingRoot "$RuntimeIdentifier-$modeSuffix"
 $stagingPackageRoot = $stagingVariantRoot
@@ -135,6 +158,66 @@ New-Item -ItemType Directory -Path $stagingPackageRoot -Force | Out-Null
 Copy-Item -Path (Join-Path $packageRoot '*') -Destination $stagingPackageRoot -Recurse -Force
 Remove-PythonCaches -root $stagingPackageRoot
 
+# --- Native SDK library -------------------------------------------------------------------
+$nativeLibraryName = switch ($RuntimeIdentifier)
+{
+    'win-x64'   { 'omnibuscloud_native.dll' }
+    'linux-x64' { 'libomnibuscloud_native.so' }
+    'osx-arm64' { 'libomnibuscloud_native.dylib' }
+}
+$nativeVersionFile = Join-Path $packageRoot 'vendor\NATIVE_VERSION'
+$effectiveNativeVersion = $NativeVersion
+if ([string]::IsNullOrWhiteSpace($effectiveNativeVersion) -and (Test-Path $nativeVersionFile))
+{
+    $effectiveNativeVersion = (Get-Content $nativeVersionFile -Raw).Trim()
+}
+$stagedNativeDir = Join-Path $stagingPackageRoot "vendor\pyoc\native\$RuntimeIdentifier"
+$stagedNativeLibrary = Join-Path $stagedNativeDir $nativeLibraryName
+
+# Never ship a stale library copied along with the source tree.
+$vendoredNativeRoot = Join-Path $stagingPackageRoot 'vendor\pyoc\native'
+if (Test-Path $vendoredNativeRoot) { Remove-Item $vendoredNativeRoot -Recurse -Force }
+
+if (-not [string]::IsNullOrWhiteSpace($NativeLibraryPath))
+{
+    if (-not (Test-Path $NativeLibraryPath)) { throw "Native library not found: $NativeLibraryPath" }
+    New-Item -ItemType Directory -Path $stagedNativeDir -Force | Out-Null
+    Copy-Item -Path $NativeLibraryPath -Destination $stagedNativeLibrary -Force
+    Write-Output "Native library: $NativeLibraryPath (explicit)"
+}
+elseif (-not [string]::IsNullOrWhiteSpace($effectiveNativeVersion))
+{
+    # The public carrier nupkg is a zip: runtimes/<rid>/native/<library> (+ include/, python/, docs/).
+    $carrierId = 'outwit.cloud.sdk.native'
+    $carrierUrl = "https://api.nuget.org/v3-flatcontainer/$carrierId/$effectiveNativeVersion/$carrierId.$effectiveNativeVersion.nupkg"
+    $carrierCache = Join-Path $artifactsRoot "native\$carrierId.$effectiveNativeVersion.nupkg"
+    if (-not (Test-Path $carrierCache))
+    {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $carrierCache) -Force | Out-Null
+        Write-Output "Downloading native carrier $carrierId $effectiveNativeVersion from nuget.org..."
+        Invoke-WebRequest -Uri $carrierUrl -OutFile $carrierCache -UseBasicParsing
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($carrierCache)
+    try
+    {
+        $entryName = "runtimes/$RuntimeIdentifier/native/$nativeLibraryName"
+        $entry = $archive.Entries | Where-Object { $_.FullName -eq $entryName } | Select-Object -First 1
+        if ($null -eq $entry) { throw "The carrier package $carrierId $effectiveNativeVersion has no $entryName" }
+        New-Item -ItemType Directory -Path $stagedNativeDir -Force | Out-Null
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $stagedNativeLibrary, $true)
+    }
+    finally
+    {
+        $archive.Dispose()
+    }
+    Write-Output "Native library: $nativeLibraryName from $carrierId $effectiveNativeVersion"
+}
+elseif ($NoBridge)
+{
+    throw "A bridge-less package needs the native library: pass -NativeVersion / -NativeLibraryPath or pin vendor/NATIVE_VERSION."
+}
+
 # Stamp this build's target platform into the staged manifest so the zip is platform-specific.
 $stagedManifest = Join-Path $stagingPackageRoot 'blender_manifest.toml'
 if (Test-Path $stagedManifest)
@@ -161,30 +244,33 @@ if (Test-Path $stagedManifest)
     Set-Content -Path $stagedManifest -Value $stagedManifestContent -NoNewline
 }
 
-$effectiveBridgePublishPath = $BridgePublishPath
-if ([string]::IsNullOrWhiteSpace($effectiveBridgePublishPath))
+if (-not $NoBridge)
 {
-    $effectiveBridgePublishPath = Join-Path $publishRoot "$RuntimeIdentifier-$modeSuffix"
-}
-
-if (-not $SkipBridgePublish)
-{
-    if (Test-Path $effectiveBridgePublishPath)
+    $effectiveBridgePublishPath = $BridgePublishPath
+    if ([string]::IsNullOrWhiteSpace($effectiveBridgePublishPath))
     {
-        Remove-Item $effectiveBridgePublishPath -Recurse -Force
+        $effectiveBridgePublishPath = Join-Path $publishRoot "$RuntimeIdentifier-$modeSuffix"
     }
 
-    New-Item -ItemType Directory -Path $effectiveBridgePublishPath -Force | Out-Null
-    Publish-Bridge -outputPath $effectiveBridgePublishPath
-}
+    if (-not $SkipBridgePublish)
+    {
+        if (Test-Path $effectiveBridgePublishPath)
+        {
+            Remove-Item $effectiveBridgePublishPath -Recurse -Force
+        }
 
-if (-not (Test-Path $effectiveBridgePublishPath))
-{
-    throw "Bridge publish output was not found: $effectiveBridgePublishPath"
-}
+        New-Item -ItemType Directory -Path $effectiveBridgePublishPath -Force | Out-Null
+        Publish-Bridge -outputPath $effectiveBridgePublishPath
+    }
 
-New-Item -ItemType Directory -Path $stagingBridgeRoot -Force | Out-Null
-Copy-Item -Path (Join-Path $effectiveBridgePublishPath '*') -Destination $stagingBridgeRoot -Recurse -Force
+    if (-not (Test-Path $effectiveBridgePublishPath))
+    {
+        throw "Bridge publish output was not found: $effectiveBridgePublishPath"
+    }
+
+    New-Item -ItemType Directory -Path $stagingBridgeRoot -Force | Out-Null
+    Copy-Item -Path (Join-Path $effectiveBridgePublishPath '*') -Destination $stagingBridgeRoot -Recurse -Force
+}
 
 if (Test-Path $zipPath)
 {

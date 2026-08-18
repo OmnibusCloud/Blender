@@ -1,10 +1,10 @@
 bl_info = {
     "name": "OmnibusCloud Render Bridge",
     "author": "OutWit",
-    "version": (1, 0, 12),
-    "blender": (4, 0, 0),
+    "version": (2, 0, 0),
+    "blender": (4, 2, 0),
     "location": "View3D > Sidebar > OmnibusCloud",
-    "description": "Thin Blender addon for the local OmnibusCloud render bridge",
+    "description": "Render on OmnibusCloud from Blender through the embedded native SDK client",
     "category": "Render",
 }
 

@@ -17,6 +17,22 @@ def _on_remember_render_settings_changed(self, context) -> None:
         pass
 
 
+def _package_is_embedded_only() -> bool:
+    """A package that ships the native library and no bridge runs embedded by default: there is
+    nothing else it could run. Bridge-carrying packages keep the bridge as the default."""
+    try:
+        import os
+
+        from .vendor import pyoc
+
+        root = os.path.dirname(os.path.abspath(__file__))
+        has_native = os.path.isfile(os.path.join(root, "vendor", "pyoc", "native", pyoc.runtime_identifier(), pyoc.library_file_name()))
+        has_bridge = os.path.isdir(os.path.join(root, "bridge"))
+        return has_native and not has_bridge
+    except Exception:
+        return False
+
+
 class OutWitBridgeAddonPreferences(AddonPreferences):
     bl_idname = __package__ or "OutWit.Render.BlenderAddon"
 
@@ -55,7 +71,7 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
         description="Talk to OmnibusCloud in-process through the native SDK instead of the local bridge "
                     "process. Takes effect on the next Blender start (the native library is loaded once "
                     "per process)",
-        default=False,
+        default=_package_is_embedded_only(),
     )
 
     server_url: StringProperty(

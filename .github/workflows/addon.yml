@@ -54,13 +54,16 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Build addon package (${{ matrix.rid }}, self-contained)
+      # Bridge-less package (addon 2.0): the embedded client over the OmnibusCloud native SDK is
+      # the only transport; the native library comes from the public carrier package
+      # OutWit.Cloud.SDK.Native on nuget.org at the version pinned in vendor/NATIVE_VERSION.
+      - name: Build addon package (${{ matrix.rid }}, embedded native SDK)
         shell: pwsh
-        run: ./OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1 -RuntimeIdentifier ${{ matrix.rid }} -DeploymentMode SelfContained
+        run: ./OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1 -RuntimeIdentifier ${{ matrix.rid }} -NoBridge
 
-      # Guards two packaging invariants: blender_manifest.toml must sit at the zip ROOT (Blender's
-      # extension installer requirement), and unix bridges must carry the executable bit (native
-      # zip path in the build script; Compress-Archive would silently drop it).
+      # Guards the packaging invariants: blender_manifest.toml must sit at the zip ROOT (Blender's
+      # extension installer requirement), the native library for the target platform must be inside
+      # vendor/pyoc/native/<rid>/, and no bridge payload may sneak in.
       - name: Verify package layout
         shell: bash
         run: |
@@ -69,11 +72,15 @@ jobs:
           unzip -l "$ZIP" | sed -n '1,12p'
           unzip -l "$ZIP" | awk '{print $4}' | grep -qx 'blender_manifest.toml' \
             || { echo "::error::blender_manifest.toml is not at the zip root"; exit 1; }
-          if [ "${{ matrix.rid }}" != "win-x64" ]; then
-            INFO=$(zipinfo "$ZIP" | grep 'OutWit.Render.BlenderBridge$' || true)
-            echo "$INFO"
-            echo "$INFO" | grep -q '^-rwx' \
-              || { echo "::error::bridge binary is not executable inside the package"; exit 1; }
+          case "${{ matrix.rid }}" in
+            win-x64)   LIB=omnibuscloud_native.dll ;;
+            linux-x64) LIB=libomnibuscloud_native.so ;;
+            osx-arm64) LIB=libomnibuscloud_native.dylib ;;
+          esac
+          unzip -l "$ZIP" | awk '{print $4}' | grep -qx "vendor/pyoc/native/${{ matrix.rid }}/$LIB" \
+            || { echo "::error::native library vendor/pyoc/native/${{ matrix.rid }}/$LIB is missing from the package"; exit 1; }
+          if unzip -l "$ZIP" | awk '{print $4}' | grep -q '^bridge/'; then
+            echo "::error::a bridge payload is inside a bridge-less package"; exit 1
           fi
 
       - name: Upload build artifact
@@ -120,11 +127,16 @@ jobs:
           WORK="$RUNNER_TEMP/addon"; rm -rf "$WORK"; mkdir -p "$WORK"
           unzip -q "$ZIP" -d "$WORK"
 
+          # Sign the bridge when the package carries one; otherwise the native SDK library
+          # (bridge-less packages, addon 2.0).
           BRIDGE=$(find "$WORK" -type f -name 'OutWit.Render.BlenderBridge' -path '*osx-arm64*' | head -1)
           if [ -z "$BRIDGE" ]; then
-            echo "::error::bridge binary not found inside the package"; exit 1
+            BRIDGE=$(find "$WORK" -type f -name 'libomnibuscloud_native.dylib' | head -1)
           fi
-          echo "Bridge binary: $BRIDGE"
+          if [ -z "$BRIDGE" ]; then
+            echo "::error::neither a bridge binary nor the native library was found inside the package"; exit 1
+          fi
+          echo "Signing target: $BRIDGE"
           # Belt-and-braces: the build job stores the exec bit via native zip, but make sure the
           # re-packed archive always ships a runnable binary.
           chmod +x "$BRIDGE"
@@ -243,9 +255,12 @@ jobs:
           unzip -q "$ZIP" -d "$WORK"
           BRIDGE=$(find "$WORK" -type f -name 'OutWit.Render.BlenderBridge.exe' | head -1)
           if [ -z "$BRIDGE" ]; then
-            echo "::error::bridge .exe not found inside the Windows package"; exit 1
+            BRIDGE=$(find "$WORK" -type f -name 'omnibuscloud_native.dll' | head -1)
           fi
-          echo "Bridge binary: $BRIDGE"
+          if [ -z "$BRIDGE" ]; then
+            echo "::error::neither the bridge .exe nor the native .dll was found inside the Windows package"; exit 1
+          fi
+          echo "Signing target: $BRIDGE"
           echo "BRIDGE_PATH=$BRIDGE" >> "$GITHUB_ENV"
           echo "WORK_DIR=$WORK" >> "$GITHUB_ENV"
 
@@ -270,7 +285,7 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         run: |
           set -euo pipefail
-          mv -f "$RUNNER_TEMP/signed/OutWit.Render.BlenderBridge.exe" "$BRIDGE_PATH"
+          mv -f "$RUNNER_TEMP/signed/$(basename "$BRIDGE_PATH")" "$BRIDGE_PATH"
           (cd "$WORK_DIR" && zip -qry "$RUNNER_TEMP/$ZIP_NAME" .)
           rm -rf stage-signed; mkdir -p stage-signed
           mv -f "$RUNNER_TEMP/$ZIP_NAME" "stage-signed/$ZIP_NAME"
@@ -322,4 +337,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
-          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-rc') }}
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-rc') || contains(github.ref_name, '-dev') || contains(github.ref_name, '-test') || contains(github.ref_name, '-internal') }}
