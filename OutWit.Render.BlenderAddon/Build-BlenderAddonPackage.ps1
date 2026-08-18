@@ -165,17 +165,19 @@ $nativeLibraryName = switch ($RuntimeIdentifier)
     'linux-x64' { 'libomnibuscloud_native.so' }
     'osx-arm64' { 'libomnibuscloud_native.dylib' }
 }
-$nativeVersionFile = Join-Path $packageRoot 'vendor\NATIVE_VERSION'
+$nativeVersionFile = [System.IO.Path]::Combine($packageRoot, 'vendor', 'NATIVE_VERSION')
 $effectiveNativeVersion = $NativeVersion
 if ([string]::IsNullOrWhiteSpace($effectiveNativeVersion) -and (Test-Path $nativeVersionFile))
 {
     $effectiveNativeVersion = (Get-Content $nativeVersionFile -Raw).Trim()
 }
-$stagedNativeDir = Join-Path $stagingPackageRoot "vendor\pyoc\native\$RuntimeIdentifier"
-$stagedNativeLibrary = Join-Path $stagedNativeDir $nativeLibraryName
+# Raw .NET calls below (ZipFile, ExtractToFile) see these paths verbatim, so they are built with the
+# platform separator rather than the provider-normalized backslash form used elsewhere in this script.
+$vendoredNativeRoot = [System.IO.Path]::Combine($stagingPackageRoot, 'vendor', 'pyoc', 'native')
+$stagedNativeDir = [System.IO.Path]::Combine($vendoredNativeRoot, $RuntimeIdentifier)
+$stagedNativeLibrary = [System.IO.Path]::Combine($stagedNativeDir, $nativeLibraryName)
 
 # Never ship a stale library copied along with the source tree.
-$vendoredNativeRoot = Join-Path $stagingPackageRoot 'vendor\pyoc\native'
 if (Test-Path $vendoredNativeRoot) { Remove-Item $vendoredNativeRoot -Recurse -Force }
 
 if (-not [string]::IsNullOrWhiteSpace($NativeLibraryPath))
@@ -190,7 +192,7 @@ elseif (-not [string]::IsNullOrWhiteSpace($effectiveNativeVersion))
     # The public carrier nupkg is a zip: runtimes/<rid>/native/<library> (+ include/, python/, docs/).
     $carrierId = 'outwit.cloud.sdk.native'
     $carrierUrl = "https://api.nuget.org/v3-flatcontainer/$carrierId/$effectiveNativeVersion/$carrierId.$effectiveNativeVersion.nupkg"
-    $carrierCache = Join-Path $artifactsRoot "native\$carrierId.$effectiveNativeVersion.nupkg"
+    $carrierCache = [System.IO.Path]::Combine($artifactsRoot, 'native', "$carrierId.$effectiveNativeVersion.nupkg")
     if (-not (Test-Path $carrierCache))
     {
         New-Item -ItemType Directory -Path (Split-Path -Parent $carrierCache) -Force | Out-Null
@@ -288,9 +290,12 @@ $nativeZip = if ($isUnixTarget -and -not $onWindows) { Get-Command zip -ErrorAct
 
 if ($nativeZip)
 {
-    Get-ChildItem -Path $stagingBridgeRoot -File -Recurse |
-        Where-Object { $_.Name -eq 'OutWit.Render.BlenderBridge' } |
-        ForEach-Object { & chmod +x $_.FullName }
+    if (-not $NoBridge -and (Test-Path $stagingBridgeRoot))
+    {
+        Get-ChildItem -Path $stagingBridgeRoot -File -Recurse |
+            Where-Object { $_.Name -eq 'OutWit.Render.BlenderBridge' } |
+            ForEach-Object { & chmod +x $_.FullName }
+    }
 
     Push-Location $stagingVariantRoot
     try
@@ -312,7 +317,24 @@ else
     {
         Write-Warning "Packing a unix target without the native 'zip' tool: the bridge executable bit will NOT be stored in the archive. Release packages must be built on a unix host."
     }
-    Compress-Archive -Path (Join-Path $stagingVariantRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
+    # Entries are written one by one with '/' separators: Windows PowerShell 5.1's Compress-Archive
+    # (and its ZipFile.CreateFromDirectory) store backslash entry names, which unpack as literal
+    # file names anywhere but Windows.
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try
+    {
+        $rootPrefix = (Resolve-Path $stagingVariantRoot).Path.TrimEnd([char]'\', [char]'/') + [System.IO.Path]::DirectorySeparatorChar
+        Get-ChildItem -Path $stagingVariantRoot -File -Recurse | ForEach-Object {
+            $entryName = $_.FullName.Substring($rootPrefix.Length).Replace([char]'\', [char]'/')
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    }
+    finally
+    {
+        $archive.Dispose()
+    }
 }
 
 Write-Output "Created Blender addon package: $zipPath"
