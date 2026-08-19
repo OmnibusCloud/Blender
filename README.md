@@ -5,7 +5,7 @@ network without leaving Blender: sign in, pick the output, press **Render** — 
 uploaded, split across the network, and the finished frames or video come back straight into
 Blender.
 
-**2.0 (in progress, dev releases):** the extension talks to OmnibusCloud **in-process**
+**2.0:** the extension talks to OmnibusCloud **in-process**
 through the OmnibusCloud native SDK — `outwit_render_bridge/vendor/pyoc` (the SDK's
 Python face, `ctypes`) over the platform's `omnibuscloud_native` library bundled in the
 zip. No companion process, no loopback REST, no lease. Sign-in (PKCE, system browser,
@@ -23,8 +23,8 @@ controller's model).
   launched and supervised by the addon. It owns the OIDC sign-in and all cloud
   communication, and serves a loopback REST API the addon talks to.
 
-The 1.x bridge stays available, frozen, for Blender versions before 4.2; 2.0 removes the
-bridge from the package and the repository in its release commit.
+The 1.x bridge line is frozen in the git history (`addon-v1.*` tags) for Blender
+versions before 4.2; 2.0 removed the bridge from the package and the repository.
 
 ---
 

@@ -59,7 +59,7 @@ jobs:
       # OutWit.Cloud.SDK.Native on nuget.org at the version pinned in vendor/NATIVE_VERSION.
       - name: Build addon package (${{ matrix.rid }}, embedded native SDK)
         shell: pwsh
-        run: ./OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1 -RuntimeIdentifier ${{ matrix.rid }} -NoBridge
+        run: ./OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1 -RuntimeIdentifier ${{ matrix.rid }}
 
       # Guards the packaging invariants: blender_manifest.toml must sit at the zip ROOT (Blender's
       # extension installer requirement), the native library for the target platform must be inside
@@ -91,7 +91,7 @@ jobs:
           if-no-files-found: error
 
   sign-macos:
-    name: sign + notarize macOS bridge
+    name: sign + notarize macOS package
     needs: build
     runs-on: macos-latest
     steps:
@@ -115,7 +115,7 @@ jobs:
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Sign the bridge binary
+      - name: Sign the native library
         if: steps.gate.outputs.enabled == 'true'
         env:
           APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
@@ -127,14 +127,9 @@ jobs:
           WORK="$RUNNER_TEMP/addon"; rm -rf "$WORK"; mkdir -p "$WORK"
           unzip -q "$ZIP" -d "$WORK"
 
-          # Sign the bridge when the package carries one; otherwise the native SDK library
-          # (bridge-less packages, addon 2.0).
-          BRIDGE=$(find "$WORK" -type f -name 'OutWit.Render.BlenderBridge' -path '*osx-arm64*' | head -1)
+          BRIDGE=$(find "$WORK" -type f -name 'libomnibuscloud_native.dylib' | head -1)
           if [ -z "$BRIDGE" ]; then
-            BRIDGE=$(find "$WORK" -type f -name 'libomnibuscloud_native.dylib' | head -1)
-          fi
-          if [ -z "$BRIDGE" ]; then
-            echo "::error::neither a bridge binary nor the native library was found inside the package"; exit 1
+            echo "::error::the native library was not found inside the package"; exit 1
           fi
           echo "Signing target: $BRIDGE"
           # Belt-and-braces: the build job stores the exec bit via native zip, but make sure the
@@ -209,7 +204,7 @@ jobs:
           if-no-files-found: error
 
   sign-windows:
-    name: sign Windows bridge (SSL.com eSigner)
+    name: sign Windows package (SSL.com eSigner)
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -253,12 +248,9 @@ jobs:
           echo "ZIP_NAME=$(basename "$ZIP")" >> "$GITHUB_ENV"
           WORK="$RUNNER_TEMP/addon"; rm -rf "$WORK"; mkdir -p "$WORK"
           unzip -q "$ZIP" -d "$WORK"
-          BRIDGE=$(find "$WORK" -type f -name 'OutWit.Render.BlenderBridge.exe' | head -1)
+          BRIDGE=$(find "$WORK" -type f -name 'omnibuscloud_native.dll' | head -1)
           if [ -z "$BRIDGE" ]; then
-            BRIDGE=$(find "$WORK" -type f -name 'omnibuscloud_native.dll' | head -1)
-          fi
-          if [ -z "$BRIDGE" ]; then
-            echo "::error::neither the bridge .exe nor the native .dll was found inside the Windows package"; exit 1
+            echo "::error::the native .dll was not found inside the Windows package"; exit 1
           fi
           echo "Signing target: $BRIDGE"
           echo "BRIDGE_PATH=$BRIDGE" >> "$GITHUB_ENV"

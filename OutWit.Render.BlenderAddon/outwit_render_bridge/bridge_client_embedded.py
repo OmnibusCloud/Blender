@@ -40,10 +40,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .bridge_client import BridgeClientError
 from .bridge_models import (
     AcquireLeaseResponse,
     BeginSignInResponse,
+    BridgeClientError,
     BridgeStatusResponse,
     DownloadedResultItemResponse,
     DownloadResultResponse,

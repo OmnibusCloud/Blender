@@ -11,8 +11,6 @@ from bpy.props import BoolProperty, StringProperty
 from bpy.types import Operator
 
 from .bridge_async import AsyncCall, DownloadMonitor, JobMonitor, TERMINAL_STATUSES
-from .bridge_client import BridgeClient, BridgeClientError
-from .bridge_context import load_latest_context, try_load_latest_context
 from .bridge_dependency_policy import (
     get_dependency_portability_blocking_issue,
     get_non_simulation_validation_issue,
@@ -27,23 +25,8 @@ from .bridge_engine_routing import (
     SceneEngineRoutingError,
     suggested_render_mode,
 )
-from .bridge_embedded import apply_embedded_state, get_embedded_client, is_embedded
-from .bridge_launcher import (
-    acquire_bridge_lease,
-    apply_launched_state,
-    cleanup_bridge_on_unregister,
-    ensure_bridge_running,
-    get_effective_context_directory,
-    is_process_running,
-    launch_bridge,
-    panel_was_seen,
-    ping_bridge_lease,
-    refresh_bridge_process_state,
-    release_bridge_lease,
-    resolve_launch_target,
-    spawn_bridge_process,
-    stop_bridge,
-)
+from .bridge_embedded import apply_embedded_state, get_embedded_client, is_embedded, user_data_root
+from .bridge_models import BridgeClientError
 from .bridge_settings_store import load_render_settings, save_render_settings
 from .bridge_render_settings import (
     compose_remember_payload,
@@ -167,8 +150,8 @@ def _stop_job_monitor() -> None:
         _active_job_monitor = None
 
 
-def _get_context_directory(context) -> str:
-    return get_effective_context_directory(context)
+def _get_context_directory(context) -> str:  # noqa: ARG001 - signature kept for the call sites
+    return str(user_data_root())
 
 
 def _first_scope_id(state, attr: str) -> str:
@@ -245,22 +228,10 @@ def _get_runtime_state(context):
     return context.window_manager.outwit_bridge_state
 
 
-def _get_bridge_client(context) -> BridgeClient:
-    # The migration toggle (05-blender-sdk-migration.md, 11): the embedded client keeps the
-    # BridgeClient surface, so everything above this line is transport-agnostic.
-    if is_embedded(context):
-        return get_embedded_client(context)
-    ensure_bridge_running(context)
-    return BridgeClient(_get_context_directory(context))
-
-
-def _apply_context(state, bridge_context, context_path: str) -> None:
-    state.bridge_url = bridge_context.local_rest_url
-    state.context_path = context_path
-    state.bridge_process_id = bridge_context.bridge_process_id
-    state.bridge_is_running = True
-    state.is_secret_required = bridge_context.is_secret_required
-    state.bridge_session_directory = os.path.dirname(context_path)
+def _get_bridge_client(context):
+    """The in-process client (05-blender-sdk-migration.md, 11: the embedded client kept the
+    old BridgeClient surface, so everything above this line stayed transport-agnostic)."""
+    return get_embedded_client(context)
 
 
 def _get_current_blend_path() -> str:
@@ -1139,8 +1110,6 @@ def _auto_refresh_job_timer() -> float:
 # timer. _lazy_launch_call is the in-flight spawn; _lazy_launch_failed latches after a failure (e.g.
 # binary not found) to stop a respawn storm until something re-arms it (manual Connect / Phase-4
 # auto-reconnect on a recoverable cause).
-_lazy_launch_call: AsyncCall | None = None
-_lazy_launch_failed = False
 
 # Bridge PID whose cloud/session state we already pulled. The bridge RESTORES the persisted login
 # by itself at startup, but is_signed_in was only ever written by operator-driven
@@ -1195,103 +1164,6 @@ def _redraw_on_connection_change(state) -> None:
     if signature != _last_conn_signature:
         _last_conn_signature = signature
         _tag_job_areas_redraw()
-
-
-def _addon_auto_start_enabled(context) -> bool:
-    try:
-        return bool(context.preferences.addons[__package__].preferences.auto_start_bridge)
-    except Exception:
-        return False
-
-
-def rearm_lazy_first_start() -> None:
-    """Clear the failure latch so the heartbeat timer will attempt a lazy launch again. Called by the
-    manual Connect path and (Phase 4) by auto-reconnect on a recoverable cause."""
-    global _lazy_launch_failed
-    _lazy_launch_failed = False
-
-
-def _try_adopt_running_bridge(context) -> bool:
-    """Re-attach to a bridge that is ALREADY running instead of spawning a second one. Opening
-    another .blend replaces the WindowManager — and with it our runtime state (bridge PID, lease
-    id) — while the bridge process is alive and holding the port: a blind spawn then crashes on
-    the busy port, latches the failure, and the orphaned bridge kills itself when its un-pinged
-    lease expires (live finding 2026-06-12). Re-discover it through the connection-context file."""
-    state = _get_runtime_state(context)
-    try:
-        executable_path, session_directory = resolve_launch_target(context)
-        bridge_context, context_path = try_load_latest_context(str(session_directory))
-    except Exception:
-        return False
-
-    if bridge_context is None or context_path is None:
-        return False
-    if not is_process_running(int(bridge_context.bridge_process_id or 0)):
-        return False
-
-    state.bridge_process_id = bridge_context.bridge_process_id
-    state.bridge_is_running = True
-    state.bridge_started_by_addon = True
-    state.bridge_executable_path = str(executable_path)
-    state.bridge_session_directory = os.path.dirname(context_path)
-    state.bridge_launch_message = "Reconnected to the running bridge."
-    try:
-        # A fresh lease replaces the stale one well before its timeout, so the watchdog stands down.
-        acquire_bridge_lease(context)
-    except Exception as ex:  # noqa: BLE001 - surfaced in state; retried by the heartbeat
-        state.last_error = str(ex)
-    return True
-
-
-def _pump_lazy_first_start(context) -> None:
-    """Drive the one-time lazy bridge launch from the persistent heartbeat timer (main thread). The
-    slow spawn runs on a worker; this only marshals its result back and writes state. No-op once the
-    bridge is running, before the panel has been shown, or while the failure latch is set."""
-    global _lazy_launch_call, _lazy_launch_failed
-    state = context.window_manager.outwit_bridge_state
-
-    # Marshal an in-flight spawn.
-    if _lazy_launch_call is not None:
-        if not _lazy_launch_call.done:
-            return
-        call, _lazy_launch_call = _lazy_launch_call, None
-        if call.error is not None:
-            _lazy_launch_failed = True
-            state.last_error = str(call.error)
-            state.bridge_launch_message = "Bridge auto-start failed."
-            return
-        process_id, executable_path, session_directory = call.result
-        apply_launched_state(state, process_id, executable_path, session_directory)
-        try:
-            acquire_bridge_lease(context)
-        except Exception as ex:  # noqa: BLE001 - surfaced in state, watchdog still protects
-            state.last_error = str(ex)
-        return
-
-    # Decide whether to begin one: lazy-first-start fires only after the panel has been shown.
-    if state.bridge_is_running or _lazy_launch_failed:
-        return
-    if not panel_was_seen() or not _addon_auto_start_enabled(context):
-        return
-
-    # A bridge may already be running (state was reset by a .blend load) — adopt it, never spawn
-    # a duplicate onto the same port.
-    if _try_adopt_running_bridge(context):
-        return
-
-    try:
-        executable_path, session_directory = resolve_launch_target(context)
-    except BridgeClientError as ex:
-        # Binary not found → BridgeMissing. Latch so we don't respawn-storm; manual Locate re-arms.
-        _lazy_launch_failed = True
-        state.last_error = str(ex)
-        state.bridge_launch_message = "Bridge executable not found."
-        return
-
-    state.bridge_launch_message = "Starting bridge…"
-    _lazy_launch_call = AsyncCall(
-        lambda e=executable_path, s=session_directory: (spawn_bridge_process(e, s), e, s)
-    ).start()
 
 
 def _get_addon_preferences(context):
@@ -1525,38 +1397,15 @@ def _bridge_lease_timer() -> float:
     if state is None:
         return 5.0
 
-    embedded = is_embedded(context)
-    if embedded:
-        # In-process client: the "bridge" is this process. Fold SDK events by refreshing the
-        # session snapshot on the heartbeat; nothing to spawn, adopt or ping.
-        apply_embedded_state(state)
-    else:
-        refresh_bridge_process_state(context)
-        _pump_lazy_first_start(context)
+    # In-process client: this process IS the transport. Fold SDK events by refreshing the
+    # session snapshot on the heartbeat; nothing to spawn, adopt or ping.
+    apply_embedded_state(state)
     _pump_session_state_sync(context)
-    if embedded:
-        _pump_embedded_session(context)
+    _pump_embedded_session(context)
     _pump_render_settings(context)
     # Repaint the panel when the connection phase changes (heartbeat-driven; replaces manual Refresh).
     _redraw_on_connection_change(state)
     interval = float(max(1, int(state.bridge_heartbeat_interval_seconds or 5)))
-
-    if embedded:
-        return interval
-
-    # While a lazy launch is spawning, tick fast so its result is marshalled back promptly.
-    if _lazy_launch_call is not None:
-        return 0.5
-
-    if not state.bridge_is_running or not state.bridge_lease_id:
-        return interval
-
-    try:
-        ping_bridge_lease(context)
-    except Exception as ex:
-        state.bridge_lease_acquired = False
-        state.last_error = str(ex)
-        state.status_message = "Bridge lease heartbeat failed."
 
     return interval
 
@@ -2165,16 +2014,8 @@ def _refresh_bridge_state(context) -> None:
     state = _get_runtime_state(context)
     scene = context.scene
     render = scene.render
-    if is_embedded(context):
-        client = get_embedded_client(context)
-        apply_embedded_state(state)
-    else:
-        ensure_bridge_running(context)
-        context_directory = _get_context_directory(context)
-        client = BridgeClient(context_directory)
-
-        bridge_context, context_path = load_latest_context(context_directory)
-        _apply_context(state, bridge_context, context_path)
+    client = get_embedded_client(context)
+    apply_embedded_state(state)
 
     blend_path = bpy.data.filepath or ""
     state.current_blend_path = blend_path
@@ -2280,50 +2121,18 @@ class OUTWIT_OT_bridge_refresh_status(Operator):
 
 class OUTWIT_OT_bridge_start(Operator):
     bl_idname = "outwit.bridge_start"
-    bl_label = "Start Bridge"
-    bl_description = "Start the local OmnibusCloud bridge process if it is not already running"
+    bl_label = "Connect"
+    bl_description = "Refresh the in-process OmnibusCloud client (session, scope, capabilities)"
 
     def execute(self, context):
         state = _get_runtime_state(context)
-
-        # An explicit Connect clears the lazy-start failure latch so the heartbeat timer resumes
-        # auto-managing the bridge after this manual attempt.
-        rearm_lazy_first_start()
         try:
-            if is_embedded(context):
-                _refresh_bridge_state(context)
-                self.report({"INFO"}, "Embedded client ready (no bridge process).")
-                return {"FINISHED"}
-            launch_bridge(context)
             _refresh_bridge_state(context)
-            self.report({"INFO"}, "Bridge started.")
+            self.report({"INFO"}, "OmnibusCloud client ready.")
             return {"FINISHED"}
         except Exception as ex:
             state.last_error = str(ex)
-            state.status_message = "Bridge start failed."
-            self.report({"ERROR"}, str(ex))
-            return {"CANCELLED"}
-
-
-class OUTWIT_OT_bridge_stop(Operator):
-    bl_idname = "outwit.bridge_stop"
-    bl_label = "Stop Bridge"
-    bl_description = "Stop the local OmnibusCloud bridge process tracked by the addon"
-
-    def execute(self, context):
-        state = _get_runtime_state(context)
-
-        try:
-            if is_embedded(context):
-                self.report({"INFO"}, "Embedded client: there is no bridge process to stop (sign out instead).")
-                return {"CANCELLED"}
-            stop_bridge(context)
-            state.status_message = "Bridge stopped."
-            self.report({"INFO"}, "Bridge stopped.")
-            return {"FINISHED"}
-        except Exception as ex:
-            state.last_error = str(ex)
-            state.status_message = "Bridge stop failed."
+            state.status_message = "Connect failed."
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
 
@@ -3154,7 +2963,6 @@ class OUTWIT_OT_bridge_copy_text(Operator):
 CLASSES = (
     OUTWIT_OT_bridge_refresh_status,
     OUTWIT_OT_bridge_start,
-    OUTWIT_OT_bridge_stop,
     OUTWIT_OT_bridge_sign_in,
     OUTWIT_OT_bridge_sign_out,
     OUTWIT_OT_bridge_upload_blend,

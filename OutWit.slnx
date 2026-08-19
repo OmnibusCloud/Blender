@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="OutWit.Render.BlenderBridge/OutWit.Render.BlenderBridge.csproj" />
-  <Project Path="OutWit.Render.BlenderBridge.Tests/OutWit.Render.BlenderBridge.Tests.csproj" />
-  <Project Path="OutWit.Render.BlenderBridge.LocalTests/OutWit.Render.BlenderBridge.LocalTests.csproj" />
-</Solution>

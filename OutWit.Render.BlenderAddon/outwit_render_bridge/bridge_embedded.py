@@ -34,12 +34,10 @@ _client: EmbeddedBridgeClient | None = None
 _client_key: tuple | None = None
 
 
-def is_embedded(context) -> bool:
-    """Whether the addon runs the in-process client instead of the companion bridge."""
-    try:
-        return bool(context.preferences.addons[__package__].preferences.use_embedded_client)
-    except (AttributeError, KeyError):
-        return False
+def is_embedded(context) -> bool:  # noqa: ARG001 - signature kept for the call sites
+    """Always true since 2.0: the in-process client is the only transport (the 1.x bridge
+    lives in git history for Blender versions before 4.2)."""
+    return True
 
 
 def _preferences(context):

@@ -2,13 +2,6 @@ param(
     [ValidateSet('win-x64', 'linux-x64', 'osx-arm64')]
     [string]$RuntimeIdentifier = 'win-x64',
 
-    [ValidateSet('SelfContained', 'FrameworkDependent')]
-    [string]$DeploymentMode = 'SelfContained',
-
-    [string]$BridgePublishPath = '',
-
-    [switch]$SkipBridgePublish,
-
     # --- Native SDK (embedded client) -------------------------------------------------------
     # The OmnibusCloud native library the embedded client loads in-process. Sourced from the
     # public carrier package OutWit.Cloud.SDK.Native on nuget.org (runtimes/<rid>/native/...);
@@ -16,12 +9,7 @@ param(
     # -NativeLibraryPath (a local build) wins over the download.
     [string]$NativeVersion = '',
 
-    [string]$NativeLibraryPath = '',
-
-    # Package WITHOUT the companion bridge process: the target shape of the addon (the embedded
-    # client over the native SDK is the only transport). Bridge-less packages default the addon
-    # to the embedded client at runtime.
-    [switch]$NoBridge
+    [string]$NativeLibraryPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -29,20 +17,13 @@ $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $packageRoot = Join-Path $scriptRoot 'outwit_render_bridge'
-$bridgeProject = Join-Path $scriptRoot '..\OutWit.Render.BlenderBridge\OutWit.Render.BlenderBridge.csproj'
 $distRoot = Join-Path $scriptRoot 'dist'
 $artifactsRoot = Join-Path $scriptRoot 'artifacts'
 $stagingRoot = Join-Path $artifactsRoot 'staging'
-$publishRoot = Join-Path $artifactsRoot 'publish'
 
 if (-not (Test-Path $packageRoot))
 {
     throw "Blender addon package folder was not found: $packageRoot"
-}
-
-if (-not $NoBridge -and -not (Test-Path $bridgeProject))
-{
-    throw "Blender bridge project was not found: $bridgeProject"
 }
 
 $initFile = Join-Path $packageRoot '__init__.py'
@@ -87,22 +68,11 @@ $platformTag = switch ($RuntimeIdentifier)
     default { throw "No Blender platform tag mapping for runtime '$RuntimeIdentifier'." }
 }
 
-$modeFolder = if ($DeploymentMode -eq 'SelfContained') { 'self-contained' } else { 'framework-dependent' }
-$modeSuffix = if ($DeploymentMode -eq 'SelfContained') { 'selfcontained' } else { 'dotnet' }
-if ($NoBridge)
-{
-    # One flavour, no deployment mode: the native library is self-contained by construction.
-    $modeSuffix = 'embedded'
-    $zipName = "omnibuscloud-render-blender-addon-$RuntimeIdentifier-$version.zip"
-}
-else
-{
-    $zipName = "omnibuscloud-render-bridge-blender-addon-$RuntimeIdentifier-$modeSuffix-$version.zip"
-}
+# One flavour: the native library is self-contained by construction.
+$zipName = "omnibuscloud-render-blender-addon-$RuntimeIdentifier-$version.zip"
 $zipPath = Join-Path $distRoot $zipName
-$stagingVariantRoot = Join-Path $stagingRoot "$RuntimeIdentifier-$modeSuffix"
+$stagingVariantRoot = Join-Path $stagingRoot "$RuntimeIdentifier-embedded"
 $stagingPackageRoot = $stagingVariantRoot
-$stagingBridgeRoot = Join-Path $stagingPackageRoot "bridge\$RuntimeIdentifier\$modeFolder"
 
 function Remove-PythonCaches([string]$root)
 {
@@ -113,35 +83,6 @@ function Remove-PythonCaches([string]$root)
 
     Get-ChildItem -Path $root -Directory -Filter '__pycache__' -Recurse | Remove-Item -Recurse -Force
     Get-ChildItem -Path $root -File -Filter '*.pyc' -Recurse | Remove-Item -Force
-}
-
-function Publish-Bridge([string]$outputPath)
-{
-    $arguments = @(
-        'publish',
-        $bridgeProject,
-        '-c', 'Release',
-        '-r', $RuntimeIdentifier,
-        '-o', $outputPath,
-        # Stamp the bridge with the addon version (bl_info/manifest, validated equal above) so
-        # GetBridgeStatusAsync reports the release it shipped with instead of a static 1.0.0.
-        "/p:Version=$version"
-    )
-
-    if ($DeploymentMode -eq 'SelfContained')
-    {
-        $arguments += @('--self-contained', 'true', '/p:PublishSingleFile=true', '/p:PublishTrimmed=false')
-    }
-    else
-    {
-        $arguments += @('--self-contained', 'false', '/p:UseAppHost=true')
-    }
-
-    & dotnet @arguments
-    if ($LASTEXITCODE -ne 0)
-    {
-        throw "Bridge publish failed for $RuntimeIdentifier / $DeploymentMode."
-    }
 }
 
 if (-not (Test-Path $distRoot))
@@ -215,9 +156,9 @@ elseif (-not [string]::IsNullOrWhiteSpace($effectiveNativeVersion))
     }
     Write-Output "Native library: $nativeLibraryName from $carrierId $effectiveNativeVersion"
 }
-elseif ($NoBridge)
+else
 {
-    throw "A bridge-less package needs the native library: pass -NativeVersion / -NativeLibraryPath or pin vendor/NATIVE_VERSION."
+    throw "The package needs the native library: pass -NativeVersion / -NativeLibraryPath or pin vendor/NATIVE_VERSION."
 }
 
 # Stamp this build's target platform into the staged manifest so the zip is platform-specific.
@@ -246,57 +187,20 @@ if (Test-Path $stagedManifest)
     Set-Content -Path $stagedManifest -Value $stagedManifestContent -NoNewline
 }
 
-if (-not $NoBridge)
-{
-    $effectiveBridgePublishPath = $BridgePublishPath
-    if ([string]::IsNullOrWhiteSpace($effectiveBridgePublishPath))
-    {
-        $effectiveBridgePublishPath = Join-Path $publishRoot "$RuntimeIdentifier-$modeSuffix"
-    }
-
-    if (-not $SkipBridgePublish)
-    {
-        if (Test-Path $effectiveBridgePublishPath)
-        {
-            Remove-Item $effectiveBridgePublishPath -Recurse -Force
-        }
-
-        New-Item -ItemType Directory -Path $effectiveBridgePublishPath -Force | Out-Null
-        Publish-Bridge -outputPath $effectiveBridgePublishPath
-    }
-
-    if (-not (Test-Path $effectiveBridgePublishPath))
-    {
-        throw "Bridge publish output was not found: $effectiveBridgePublishPath"
-    }
-
-    New-Item -ItemType Directory -Path $stagingBridgeRoot -Force | Out-Null
-    Copy-Item -Path (Join-Path $effectiveBridgePublishPath '*') -Destination $stagingBridgeRoot -Recurse -Force
-}
-
 if (Test-Path $zipPath)
 {
     Remove-Item $zipPath -Force
 }
 
-# Compress-Archive (System.IO.Compression) never stores unix mode bits, so a bridge binary
-# extracted on macOS/Linux would not be executable. When packing a unix target on a unix host
-# (CI), chmod the staged apphost and pack with the native `zip`, which preserves the bit.
-# Windows-hosted builds of unix targets keep the Compress-Archive fallback for dev convenience —
-# those zips are NOT release-grade.
+# The native library needs no executable bit (dlopen/LoadLibrary reads it), but unix `zip` on a
+# unix host stays preferred for symmetric archives; the .NET writer below covers Windows hosts
+# with forward-slash entry names.
 $isUnixTarget = $RuntimeIdentifier -notlike 'win-*'
 $onWindows = [System.IO.Path]::DirectorySeparatorChar -eq [char]'\'
 $nativeZip = if ($isUnixTarget -and -not $onWindows) { Get-Command zip -ErrorAction SilentlyContinue } else { $null }
 
 if ($nativeZip)
 {
-    if (-not $NoBridge -and (Test-Path $stagingBridgeRoot))
-    {
-        Get-ChildItem -Path $stagingBridgeRoot -File -Recurse |
-            Where-Object { $_.Name -eq 'OutWit.Render.BlenderBridge' } |
-            ForEach-Object { & chmod +x $_.FullName }
-    }
-
     Push-Location $stagingVariantRoot
     try
     {
@@ -313,10 +217,6 @@ if ($nativeZip)
 }
 else
 {
-    if ($isUnixTarget)
-    {
-        Write-Warning "Packing a unix target without the native 'zip' tool: the bridge executable bit will NOT be stored in the archive. Release packages must be built on a unix host."
-    }
     # Entries are written one by one with '/' separators: Windows PowerShell 5.1's Compress-Archive
     # (and its ZipFile.CreateFromDirectory) store backslash entry names, which unpack as literal
     # file names anywhere but Windows.

@@ -10,7 +10,6 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable, Optional
 
-from .bridge_client import BridgeClient
 
 # Job statuses that mean "no more progress will come".
 TERMINAL_STATUSES = {"Completed", "Failed", "Cancelled"}
@@ -68,10 +67,12 @@ class JobMonitor:
     the job reaches a terminal status.
     """
 
-    def __init__(self, context_directory: str, job_id: str, interval_seconds: float, client: Optional[BridgeClient] = None):
-        # ``client`` is whatever ``_get_bridge_client`` hands out (the embedded client keeps the
-        # same surface); the default keeps the bridge-mode behaviour of one REST client per monitor.
-        self._client = client or BridgeClient(context_directory)
+    def __init__(self, context_directory: str, job_id: str, interval_seconds: float, client=None):
+        # ``client`` is whatever ``_get_bridge_client`` hands out; context_directory only names
+        # the per-user data root in diagnostics now that the REST transport is gone.
+        if client is None:
+            raise ValueError("JobMonitor needs a client (the embedded client instance).")
+        self._client = client
         self._job_id = job_id
         self._interval = max(0.5, float(interval_seconds))
         self._lock = threading.Lock()
@@ -142,8 +143,10 @@ class DownloadMonitor:
 
     MAX_CONSECUTIVE_POLL_FAILURES = 8
 
-    def __init__(self, context_directory: str, job_id: str, interval_seconds: float = 0.5, client: Optional[BridgeClient] = None):
-        self._client = client or BridgeClient(context_directory)
+    def __init__(self, context_directory: str, job_id: str, interval_seconds: float = 0.5, client=None):
+        if client is None:
+            raise ValueError("DownloadMonitor needs a client (the embedded client instance).")
+        self._client = client
         self._job_id = job_id
         self._interval = max(0.1, float(interval_seconds))
         self._lock = threading.Lock()

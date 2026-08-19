@@ -77,6 +77,11 @@ class BridgeLocalConnectionContext:
         )
 
 
+class BridgeClientError(Exception):
+    """The operator-level error type: every client failure an operator reports travels as this.
+    Historically raised by the REST BridgeClient; the embedded client's errors subclass it."""
+
+
 @dataclass(slots=True)
 class BridgeStatusResponse:
     bridge_version: str = ""

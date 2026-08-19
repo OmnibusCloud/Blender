@@ -22,7 +22,6 @@ from .bridge_dependency_policy import (
     get_simulation_cache_blocking_issue,
     resolve_bake_plan,
 )
-from .bridge_launcher import note_panel_visible
 from .bridge_engine_routing import scene_frame_count
 from .bridge_status import (
     Phase,
@@ -646,7 +645,6 @@ class OUTWIT_PT_bridge_panel(Panel):
     def draw(self, context):
         # Lazy-first-start: showing the OmnibusCloud panel is what triggers the (off-thread) bridge
         # launch driven by the heartbeat timer. Keep this trivial — draw() runs on the UI thread.
-        note_panel_visible()
 
         layout = self.layout
         state = _get_runtime_state(context)
@@ -728,16 +726,10 @@ class OUTWIT_PT_bridge_connection_panel(Panel):
         if addon_version:
             layout.label(text=f"Add-on: {addon_version}")
         if state.bridge_version:
-            layout.label(text=f"Bridge: {state.bridge_version}")
+            layout.label(text=f"Client: {state.bridge_version}")
 
         actions = layout.row(align=True)
         actions.operator("outwit.bridge_refresh_status", text="Refresh")
-        start_button = actions.row(align=True)
-        start_button.enabled = not state.bridge_is_running
-        start_button.operator("outwit.bridge_start", text="Start")
-        stop_button = actions.row(align=True)
-        stop_button.enabled = state.bridge_is_running and state.bridge_started_by_addon
-        stop_button.operator("outwit.bridge_stop", text="Stop")
 
 
 class OUTWIT_PT_bridge_account_panel(Panel):

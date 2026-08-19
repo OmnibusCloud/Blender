@@ -1,56 +1,65 @@
 # OutWit.Render.BlenderAddon
 
-The Blender extension package (`outwit_render_bridge/`) and its packaging scripts. The
-installable artifact is a per-platform zip with the .NET bridge bundled inside — see the
-[repo README](../README.md) for what the extension does and how to install a release.
+The Blender extension package (`outwit_render_bridge/` — the historical package name)
+and its packaging scripts. The installable artifact is a per-platform zip carrying the
+OmnibusCloud native SDK library for that platform — see the [repo README](../README.md)
+for what the extension does and how to install a release.
 
 ## Layout
 
 - `outwit_render_bridge/` — the extension sources. `__init__.py` (`bl_info`) and
   `blender_manifest.toml` carry the version in two places; the build verifies they are
   equal and fails otherwise.
-  - `bridge/<rid>/<mode>/` — where the build stages the bundled bridge binaries
-    (not in source control).
-- `Tests/` — headless Python tests; they run without Blender (`bpy` is stubbed).
+  - `vendor/pyoc/` — the SDK's Python face (`ctypes`), vendored from the WitCloud
+    `Client/python/pyoc` sources.
+  - `vendor/render_documents.py` — the published render vocabulary binding, generated
+    from the Render controller's model (`Documents/render_documents.py`).
+  - `vendor/pyoc/native/<rid>/` — where the build stages the native library
+    (not in source control; `vendor/NATIVE_VERSION` pins the carrier version).
+- `Tests/` — headless Python tests; they run without Blender (`bpy` is stubbed) and
+  without the native library (`pyoc` is faked).
 - `Build-BlenderAddonPackage.ps1` / `Build-BlenderAddonPackages.ps1` — packaging scripts.
 
 ## Build a package
 
 ```powershell
-.\Build-BlenderAddonPackage.ps1 -RuntimeIdentifier win-x64 -DeploymentMode SelfContained
+.\Build-BlenderAddonPackage.ps1 -RuntimeIdentifier win-x64
 ```
 
 - Runtime identifiers: `win-x64`, `linux-x64`, `osx-arm64`.
-- Deployment modes: `SelfContained` (no .NET required on the user's machine — what
-  releases ship) and `FrameworkDependent` (smaller, requires a .NET 10 runtime).
-- `Build-BlenderAddonPackages.ps1` builds the full matrix in one go.
+- The native library comes from the public carrier package `OutWit.Cloud.SDK.Native`
+  on nuget.org at the version pinned in `outwit_render_bridge/vendor/NATIVE_VERSION`;
+  override with `-NativeVersion <ver>` or point `-NativeLibraryPath` at a local build.
+- `Build-BlenderAddonPackages.ps1` builds all three platforms in one go.
 
-Zips land in `dist/`, version-stamped from `bl_info`/the manifest; the same version is
-compiled into the bridge binary.
-
-Linux/macOS packages must carry the executable bit on the bridge binary, which zips
-created on Windows cannot store — release packages are therefore built by CI on a Linux
-runner ([`.github/workflows/addon.yml`](../.github/workflows/addon.yml)), which also
-code-signs the bundled bridge (macOS Developer-ID + notarized; Windows Authenticode via
-SSL.com eSigner) and attaches everything to the GitHub Release on an `addon-v*` tag.
-Windows-built unix zips are fine for working on the addon itself.
+Zips land in `dist/`, version-stamped from `bl_info`/the manifest. Release packages are
+built by CI ([`.github/workflows/addon.yml`](../.github/workflows/addon.yml)) on an
+`addon-v*` tag, which code-signs the bundled native library (macOS Developer-ID +
+notarized zip; Windows Authenticode via SSL.com eSigner — skipped on `-dev`/`-test`/
+`-internal` tags to save signing quota) and attaches everything to the GitHub Release.
 
 ## Install from disk
 
-`Edit → Preferences → Add-ons → ⌄ → Install from Disk…`, pick the zip from `dist/`,
-enable **OmnibusCloud Render Bridge**. The panel appears in the 3D-viewport sidebar
-(`N` key) under the **OmnibusCloud** tab.
+`Edit → Preferences → Get Extensions → ⌄ → Install from Disk…`, pick the zip from
+`dist/`, enable **OmnibusCloud Render Bridge**. The panel appears in the 3D-viewport
+sidebar (`N` key) under the **OmnibusCloud** tab. Blender 4.2+.
 
 ## Add-on preferences
 
-- **Auto-start Bridge** (default: on) — the bundled bridge launches automatically when
-  the panel is first shown and lives for the rest of the Blender session.
-- **Bridge Executable Path** — point the addon at a local bridge build
-  (e.g. `dotnet publish` output) during development.
-- **Bridge Context Directory** — explicit bridge-discovery directory (see below).
-- **Remember last render settings** (default: on) — persists panel settings (tiles,
-  video preset, target, …) per OS user, stored by the bridge.
+- **Server URL / Identity URL** — the OmnibusCloud endpoints; changes apply after a
+  Blender restart (the native library is loaded once per process).
+- **Download Directory** — where finished renders land; empty shows the per-user
+  default it falls back to.
+- **Remember sign-in** (default: on) — the SDK persists the session in the OS keystore
+  (DPAPI / Keychain / libsecret); the addon restores it silently at startup and never
+  sees token material.
+- **Remember last render settings** (default: on) — panel settings (tiles, video
+  preset, target, …) persist in Blender's own preferences, so they survive addon
+  updates and reinstalls.
 - **Logo Variant** — Auto / Dark / Light.
+
+Developers can point the addon at a locally built native library with the
+`OMNIBUSCLOUD_NATIVE` environment variable (takes precedence over the bundled one).
 
 ## Tests
 
@@ -64,16 +73,9 @@ python -m unittest discover -s Tests -p "test_*.py"
 python -m unittest Tests.bridge_dependency_policy_tests Tests.bridge_operator_policy_tests Tests.bridge_panel_policy_tests Tests.bridge_scene_attachment_tests Tests.bridge_scene_packaging_tests
 ```
 
-## Bridge discovery
+## History
 
-A running bridge advertises itself with a `bridge-local-connection.<pid>.json` file
-containing the loopback REST URL and the per-session secret. The addon searches, in
-order:
-
-1. the **Bridge Context Directory** preference;
-2. the `OUTWIT_BRIDGE_SESSION_DIR` environment variable;
-3. `<temp>/BridgeSession`;
-4. `./BridgeSession`.
-
-This is also how the addon adopts an already-running bridge after a `.blend` switch or a
-Blender restart instead of spawning a second one.
+Through 1.x the extension drove a bundled .NET sidecar (`OutWit.Render.BlenderBridge`)
+over loopback REST; 2.0 replaced it with the in-process native SDK and the bridge was
+removed from the repository. The 1.x line lives in the git history (`addon-v1.*` tags)
+for Blender versions before 4.2.

@@ -11,7 +11,6 @@ bl_info = {
 import bpy
 
 from .branding import register_branding, unregister_branding
-from .bridge_launcher import cleanup_bridge_on_unregister
 from .bridge_operators import (
     CLASSES as OPERATOR_CLASSES,
     flush_render_settings_on_unregister,
@@ -44,17 +43,6 @@ def _safe_register_class(cls) -> None:
     bpy.utils.register_class(cls)
 
 
-def _embedded_client_active() -> bool:
-    """The embedded client has no bridge process to clean up (and its state carries this
-    process's PID, which the launcher cleanup must never terminate)."""
-    try:
-        from .bridge_embedded import is_embedded
-
-        return is_embedded(bpy.context)
-    except Exception:
-        return False
-
-
 def register():
     for cls in CLASSES:
         _safe_register_class(cls)
@@ -70,11 +58,9 @@ def unregister():
     # cleanup to find the lease + process). The .NET watchdog is the backstop for the crash path
     # where unregister never runs; this is the clean path for addon-disable / Blender-quit.
     unregister_timers()
-    # Push a pending render-preference change while the bridge is still up (the heartbeat that
-    # would normally deliver it is gone now).
+    # Push a pending render-preference change (the heartbeat that would normally deliver it is
+    # gone now); the preferences-backed store makes this a local write.
     flush_render_settings_on_unregister()
-    if not _embedded_client_active():
-        cleanup_bridge_on_unregister()
     unregister_branding()
     unregister_state()
 

@@ -1004,6 +1004,10 @@ class BridgeOperatorPolicyTests(unittest.TestCase):
         validate_response = _create_clean_validate_response()
         preflight_response = _create_ready_preflight_response()
 
+        # The operator resolves the client before running its (stubbed) steps; the embedded
+        # singleton must never be constructed in a headless test.
+        bridge_operators._get_bridge_client = lambda _context: SimpleNamespace()
+
         bridge_operators._ensure_current_scene_uploaded = lambda _context: SimpleNamespace(
             uploaded=True,
             blob_id="blob-2",
