@@ -39,8 +39,8 @@ versions before 4.2; 2.0 removed the bridge from the package and the repository.
    **Sign In** — the system browser opens, sign in with your OmnibusCloud account.
 
 Every release ships a `SHA256SUMS` file with a detached GPG signature, and the bundled
-bridge binary is code-signed on every platform — macOS (Developer ID, notarized), Windows
-(Authenticode, via SSL.com eSigner), and Linux (the signed checksums above).
+native library is code-signed — macOS (Developer ID, notarized), Windows (Authenticode,
+via SSL.com eSigner), and Linux (the signed checksums above).
 
 ---
 
@@ -54,12 +54,12 @@ bridge binary is code-signed on every platform — macOS (Developer ID, notarize
   as a broken single frame. See [Simulations](#simulations) below.
 - **Target** — the whole network, or one of the client groups you are authorized to use.
 - **Render** — one click. The addon packs the saved `.blend` with its assets and uploads
-  it through the bridge off the UI thread; the server splits the work and dispatches it
+  it in the background off the UI thread; the server splits the work and dispatches it
   across the selected machines.
 - **Progress** — live progress and **Cancel** right in the panel.
-- **Results** — frames or video stream back through the bridge in the background with a
-  live progress bar (large results never time out); open the folder or load the result
-  straight into Blender.
+- **Results** — frames or video stream back in the background with a live progress bar
+  (large results never time out); open the folder or load the result straight into
+  Blender.
 
 ---
 
@@ -69,18 +69,20 @@ bridge binary is code-signed on every platform — macOS (Developer ID, notarize
 
 - OIDC sign-in through the system browser (PKCE, loopback callback) — tokens never
   enter Blender.
-- The refresh token is stored encrypted per OS user; the session survives Blender
-  restarts and addon updates, so you sign in once.
+- The refresh token is stored encrypted per OS user (DPAPI / Keychain / libsecret) by
+  the SDK itself — token material never enters Python. The session survives Blender
+  restarts and addon updates and is restored silently at startup, so you sign in once.
 - Account display and sign-out right in the panel.
 
-### Bridge lifecycle
+### In-process client
 
-- The bundled bridge starts automatically the first time the panel is shown and serves
-  the whole Blender session.
-- An already-running bridge is adopted (after opening another `.blend` or restarting
-  Blender) instead of spawning a duplicate.
-- The bridge watches its owning Blender process and exits when it dies, with a grace
-  period for an active job.
+- The addon talks to OmnibusCloud in-process through the native SDK — no companion
+  process, no local ports, nothing to start, adopt, or watch over. The client lives
+  exactly as long as Blender does.
+- Every launch is one job request document of the published render vocabulary; the
+  server materializes it into the same typed pipeline every other client uses. See
+  [docs/initiator-architecture.md](docs/initiator-architecture.md) for how the pieces
+  fit — and how to build your own integration on the same SDK.
 
 ### Output modes & formats
 
@@ -153,7 +155,7 @@ bake runs. An unbaked simulation is never sent to a plain render.
 - Live distributed progress; a confirmation prompt guards very large frame batches.
 - **Cancel** propagates to the assigned machines and interrupts the distributed batch.
 - **Reset** recovers from any error state without restarting Blender.
-- Results download through the bridge as a background transfer — chunked streaming with a
+- Results download as a background transfer — chunked streaming with a
   progress bar and its own **Cancel**, so a multi-hundred-MB video arrives reliably even on
   a slow connection: open the file, open the folder, or load the image straight into Blender.
 
@@ -169,11 +171,11 @@ bake runs. An unbaked simulation is never sent to a plain render.
   a node remembers what worked so it doesn't re-try a bad backend every frame. One flaky GPU
   slows a node down at worst — it doesn't fail the job.
 - **Timeout-proof transfers** — scene uploads and result downloads run as background
-  transfers on the bridge, polled with quick status calls: no single request ever spans a
-  multi-minute push or pull, so file size and connection speed can't trip a client timeout.
-- **Clean updates** — the bundled bridge is staged to a per-user runtime directory and never
-  runs from inside the extension folder, so updating the addon never fails on files locked
-  by a running bridge.
+  transfers polled with quick status calls: no single request ever spans a multi-minute
+  push or pull, so file size and connection speed can't trip a client timeout.
+- **Clean updates** — the native library is staged to a per-user runtime directory and
+  never loaded from inside the extension folder, so updating the addon never fails on
+  files the OS keeps locked while they are in use.
 
 ### Panel & settings
 
@@ -191,17 +193,16 @@ bake runs. An unbaked simulation is never sent to a plain render.
 
 ## For developers
 
-Everything here is open source — use it as-is, or take it as an example of an
-OmnibusCloud **initiator** (an application that submits work to the network). The bridge
-builds against **nuget.org only** (see [`nuget.config`](nuget.config)), through the same
-public packages available to any developer.
+Everything here is open source — use it as-is, or take it as the worked example of an
+OmnibusCloud **initiator** (an application that submits work to the network) built on
+the public [`OutWit.Cloud.SDK.Native`](https://www.nuget.org/packages/OutWit.Cloud.SDK.Native)
+package — the same bits available to any developer.
 
-| Project | What it is |
+| Piece | What it is |
 | --- | --- |
-| [`OutWit.Render.BlenderAddon`](OutWit.Render.BlenderAddon/) | The Blender extension package + packaging scripts. Headless Python tests in `Tests/`. |
-| [`OutWit.Render.BlenderBridge`](OutWit.Render.BlenderBridge/) | The .NET sidecar: OIDC auth, blob upload/download, job submit/monitor/cancel; loopback REST server; lease watchdog (exits when its Blender owner dies). |
-| [`OutWit.Render.BlenderBridge.Tests`](OutWit.Render.BlenderBridge.Tests/) | Unit tests: REST transport, settings store, lease and connection-context lifecycle. |
-| [`OutWit.Render.BlenderBridge.LocalTests`](OutWit.Render.BlenderBridge.LocalTests/) | Integration tests, including `Live/` suites that run against the deployed `engine.omnibuscloud.com`, and runnable end-to-end examples with committed test scenes ([`Canonical/`](OutWit.Render.BlenderBridge.LocalTests/Canonical/)). |
+| [`OutWit.Render.BlenderAddon`](OutWit.Render.BlenderAddon/) | The Blender extension package + packaging scripts. Headless Python tests in `Tests/` (no Blender, no native library needed). |
+| [`docs/initiator-architecture.md`](docs/initiator-architecture.md) | How the addon talks to OmnibusCloud through the native SDK — and the template for building your own host integration. |
+| Publishing a controller's vocabulary | The other half of the contract lives with controller authors: [Controllers → author guide](https://github.com/OmnibusCloud/Controllers/blob/main/docs/controller-author-guide.md#non-net-initiators-publishing-a-document-vocabulary). |
 
 ---
 
@@ -214,13 +215,13 @@ carrier package `OutWit.Cloud.SDK.Native` on nuget.org at the version pinned in
 (`outwit_render_bridge/bridge/<rid>/...`).
 
 - Local: [`OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1`](OutWit.Render.BlenderAddon/Build-BlenderAddonPackage.ps1)
-  `-RuntimeIdentifier <rid> -NoBridge [-NativeVersion 0.7.0 | -NativeLibraryPath <file>]`
+  `-RuntimeIdentifier <rid> [-NativeVersion <ver> | -NativeLibraryPath <file>]`
   → zips in `dist/`. See the [addon README](OutWit.Render.BlenderAddon/README.md) for
   options and details.
 - CI: [`.github/workflows/addon.yml`](.github/workflows/addon.yml) — an `addon-v*` tag
-  builds all three platforms bridge-less, code-signs the bundled native library (macOS
-  notarized, Windows Authenticode; `-dev` / `-test` / `-internal` tags are prereleases
-  and skip eSigner to save quota), generates `SHA256SUMS` (+ GPG signature), and attaches
+  builds all three platforms, code-signs the bundled native library (macOS notarized,
+  Windows Authenticode; `-dev` / `-test` / `-internal` tags are prereleases and skip
+  eSigner to save quota), generates `SHA256SUMS` (+ GPG signature), and attaches
   everything to the GitHub Release.
 
 ---
