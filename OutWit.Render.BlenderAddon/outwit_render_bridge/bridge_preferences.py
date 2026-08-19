@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import AddonPreferences
 
 
 def _on_remember_render_settings_changed(self, context) -> None:
-    # Transient binding: the persisted value lives on the BRIDGE's per-user settings store, not in
-    # Blender's userprefs (which merely echo it). Late import dodges a module cycle; a push failure
-    # is left pending and retried by the heartbeat pump.
+    # The preference itself is the persisted master flag (bridge_settings_store); the operators
+    # hook only refreshes the seeded state. Late import dodges a module cycle.
     try:
         from . import bridge_operators
 
@@ -108,6 +107,23 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
                     "session in the OS keystore; the addon stores no token material",
         default=True,
     )
+
+    # --- Render settings storage (bridge_settings_store) -----------------------------------
+    # AddonPreferences live in Blender's user preferences keyed by the addon id, so these
+    # survive addon updates/reinstalls. Not drawn: the OmnibusCloud panel is the editing
+    # surface; these are the persisted values behind it (defaults = the historical ones).
+    render_settings_version: IntProperty(default=0, options={"HIDDEN"})
+    rs_split_frame: BoolProperty(default=False, options={"HIDDEN"})
+    rs_tiles_x: IntProperty(default=2, min=1, options={"HIDDEN"})
+    rs_tiles_y: IntProperty(default=2, min=1, options={"HIDDEN"})
+    rs_tile_overlap: IntProperty(default=8, min=0, options={"HIDDEN"})
+    rs_anim_result: StringProperty(default="Sequence", options={"HIDDEN"})
+    rs_video_container: StringProperty(default="", options={"HIDDEN"})
+    rs_video_codec: StringProperty(default="", options={"HIDDEN"})
+    rs_video_crf: IntProperty(default=23, min=0, max=51, options={"HIDDEN"})
+    rs_last_target_id: StringProperty(default="", options={"HIDDEN"})
+    rs_last_target_name: StringProperty(default="", options={"HIDDEN"})
+    rs_bake_strategy: StringProperty(default="DELEGATED", options={"HIDDEN"})
 
     logo_variant: EnumProperty(
         name="Logo Variant",

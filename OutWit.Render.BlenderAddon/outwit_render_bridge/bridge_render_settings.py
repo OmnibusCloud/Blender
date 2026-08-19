@@ -1,9 +1,9 @@
 """Phase 5: persisted render preferences — the pure decision logic.
 
-The BRIDGE owns the storage (per-OS-user render-settings.json via OutWit.Common.Settings); the
-addon's bpy props are a TRANSIENT UI binding. This module is bpy-free (its only import is the
-bpy-free bridge_models) so the seed/sticky decisions are headless-testable; the thin appliers
-that touch bpy state live in bridge_operators.
+Blender's AddonPreferences own the storage (bridge_settings_store — survives addon updates);
+the addon's bpy props are a TRANSIENT UI binding. This module is bpy-free (its only import is
+the bpy-free bridge_models) so the seed/sticky decisions are headless-testable; the thin
+appliers that touch bpy state live in bridge_operators.
 
 Flow: seed once per Blender session when the bridge becomes reachable (values → state props,
 master flag → addon preferences), target-seed once when the execution scope (groups) is known,

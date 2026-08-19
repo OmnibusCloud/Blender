@@ -44,6 +44,7 @@ from .bridge_launcher import (
     spawn_bridge_process,
     stop_bridge,
 )
+from .bridge_settings_store import load_render_settings, save_render_settings
 from .bridge_render_settings import (
     compose_remember_payload,
     compose_sticky_payload,
@@ -1401,12 +1402,10 @@ def _pump_render_settings(context) -> None:
     the bridge REST may still be warming up — we simply try again next tick."""
     global _render_settings_seeded, _render_settings_values_pending
     state = _get_runtime_state(context)
-    if not state.bridge_is_running or not state.bridge_lease_acquired:
-        return
 
     if not _render_settings_seeded:
         try:
-            settings = _get_bridge_client(context).get_render_settings()
+            settings = load_render_settings(context)
         except Exception:
             return
         _apply_render_settings_seed(context, settings)
@@ -1428,12 +1427,11 @@ def _pump_render_settings(context) -> None:
 
 
 def _push_remember_render_settings(context) -> None:
-    """Persist the master toggle: read-modify-write so only the flag changes on the bridge."""
+    """Persist the master toggle (read-modify-write of the preferences-backed store)."""
     global _remember_push_pending
-    client = _get_bridge_client(context)
-    current = client.get_render_settings()
-    client.set_render_settings(
-        compose_remember_payload(current, _remember_render_settings_enabled(context)))
+    current = load_render_settings(context)
+    save_render_settings(
+        context, compose_remember_payload(current, _remember_render_settings_enabled(context)))
     _remember_push_pending = False
 
 
@@ -1462,7 +1460,7 @@ def _seed_remembered_target(context, client) -> None:
     _render_settings_target_seeded = True
 
     try:
-        settings = client.get_render_settings()
+        settings = load_render_settings(context)
         groups = json.loads(state.groups_json) if state.groups_json else []
         projects = json.loads(state.projects_json) if state.projects_json else []
         target = resolve_target_seed(settings, groups, state.can_run_on_all_clients, projects)
@@ -1484,14 +1482,13 @@ def _seed_remembered_target(context, client) -> None:
 
 
 def _push_render_settings(context) -> None:
-    """Read-modify-write the bucket-1 values currently in the UI into the bridge store."""
+    """Read-modify-write the bucket-1 values currently in the UI into the preferences store."""
     state = _get_runtime_state(context)
-    client = _get_bridge_client(context)
-    current = client.get_render_settings()
+    current = load_render_settings(context)
     target_id = _get_selected_target_unified_id(state)
     groups = json.loads(state.groups_json) if state.groups_json else []
     projects = json.loads(state.projects_json) if state.projects_json else []
-    client.set_render_settings(compose_sticky_payload(
+    save_render_settings(context, compose_sticky_payload(
         current,
         remember=True,
         split_frame=state.split_frame,

@@ -27,9 +27,9 @@ Behaviour worth stating:
   ``result`` variable is one asset id (still, tiled still, video) or the list
   of a frame set; each asset is fetched with the SDK's asset download, one
   after another, into ``<download directory>/<job id>/``.
-- Render settings persist in a small JSON file next to the session store —
-  the same per-user location the bridge used — until they move to addon
-  preferences (05, section 7.4).
+- Render settings live in Blender's AddonPreferences (bridge_settings_store);
+  the client's get/set_render_settings file surface remains only for the
+  frozen bridge-mode parity and dies with the bridge.
 """
 from __future__ import annotations
 
