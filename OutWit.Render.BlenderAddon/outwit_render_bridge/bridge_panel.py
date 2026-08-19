@@ -407,12 +407,17 @@ def _draw_connection_gate(layout, context, state, view) -> None:
     line.alert = phase in {Phase.BRIDGE_MISSING, Phase.CLOUD_UNREACHABLE}
     line.label(text=view.status_line, icon=view.status_icon)
 
+    if phase == Phase.CONNECTING:
+        # The silent restore/connect is already running — a Connect button here would just
+        # re-trigger what is happening; the status line's spinner is the whole story.
+        return
+
     actions = layout.row(align=True)
     if phase == Phase.BRIDGE_MISSING:
         actions.operator("outwit.bridge_start", text="Locate / Start", icon="FILE_FOLDER")
     elif phase == Phase.CLOUD_UNREACHABLE:
         actions.operator("outwit.bridge_refresh_status", text="Reconnect", icon="FILE_REFRESH")
-    else:  # DISCONNECTED / CONNECTING
+    else:  # DISCONNECTED
         actions.operator("outwit.bridge_start", text="Connect", icon="PLAY")
 
 

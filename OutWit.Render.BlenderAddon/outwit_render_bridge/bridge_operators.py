@@ -1354,6 +1354,7 @@ def _pump_embedded_session(context) -> None:
         client.try_restore_session()
         session = client.get_session_state()
         status = client.get_bridge_status()
+        state.embedded_session_pending = client.is_startup_pending()
     except Exception as ex:  # noqa: BLE001 - surfaced in state; retried by the heartbeat
         state.last_error = str(ex)
         return
@@ -1596,7 +1597,9 @@ def register_timers() -> None:
         bpy.app.timers.register(_auto_refresh_job_timer, first_interval=5.0, persistent=True)
 
     if not bpy.app.timers.is_registered(_bridge_lease_timer):
-        bpy.app.timers.register(_bridge_lease_timer, first_interval=5.0, persistent=True)
+        # A fast first tick: the embedded client is created, marked in the state and its silent
+        # session restore started before the artist can register the cold "disconnected" frame.
+        bpy.app.timers.register(_bridge_lease_timer, first_interval=0.2, persistent=True)
 
     if _on_blend_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_blend_load)

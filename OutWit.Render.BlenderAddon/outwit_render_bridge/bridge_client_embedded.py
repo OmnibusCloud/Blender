@@ -225,6 +225,18 @@ class EmbeddedBridgeClient:
             except pyoc.OcError:
                 pass
 
+    def is_startup_pending(self) -> bool:
+        """True while the silent startup work is in flight — a session restore or the
+        follow-up connect. The status ladder shows one calm "Connecting" phase for the
+        whole window instead of flashing Sign In / Cloud unreachable between its steps."""
+        with self._lock:
+            self._pump()
+            return (
+                self._pending_restore is not None
+                or self._pending_connect is not None
+                or self._connecting
+            )
+
     def begin_sign_in(self) -> BeginSignInResponse:
         with self._lock:
             self._pump()

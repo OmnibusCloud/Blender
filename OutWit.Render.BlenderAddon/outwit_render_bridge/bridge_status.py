@@ -501,6 +501,13 @@ def _connection_phase(state) -> Phase:
     # as the cloud-connected signal), so the artist must be able to reach the Login CTA from that state.
     # Cloud-unreachable only matters AFTER sign-in (e.g. the session/scope fetch fails) — a real
     # post-auth connectivity problem, not the normal pre-sign-in state.
+    if getattr(state, "embedded_session_pending", False) and not (
+        getattr(state, "is_signed_in", False) and getattr(state, "is_connected_to_cloud", False)
+    ):
+        # Embedded startup: a persisted-session restore / connect is in flight. One calm
+        # phase covers the whole window — flashing "Not signed in" and then a red
+        # "Cloud unreachable" between its steps read as errors during a normal start.
+        return Phase.CONNECTING
     if not getattr(state, "is_signed_in", False):
         return Phase.SIGNED_OUT
     if not getattr(state, "is_connected_to_cloud", False):
@@ -647,14 +654,14 @@ def _diagnostics(state) -> dict:
 
 
 def _connection_status_view(state, phase: Phase) -> StatusView:
-    embedded = (getattr(state, "bridge_url", "") or "") == "embedded"
     if phase == Phase.BRIDGE_MISSING:
         return StatusView(phase, "Bridge not found", "ERROR",
                           blocker=Blocker(BlockerKind.LOCATE_BRIDGE, "Bridge not found"),
                           diagnostics=_diagnostics(state))
-    if phase == Phase.DISCONNECTED:
-        return StatusView(phase, "Connecting to OmnibusCloud…" if embedded else "Connecting to bridge…",
-                          "SORTTIME", diagnostics=_diagnostics(state))
+    if phase in (Phase.DISCONNECTED, Phase.CONNECTING):
+        # One neutral line for every pre-auth startup frame, both transports: the cold
+        # not-yet-ticked state (DISCONNECTED) and the in-flight restore/connect (CONNECTING).
+        return StatusView(phase, "Connecting to OmnibusCloud…", "SORTTIME", diagnostics=_diagnostics(state))
     if phase == Phase.CLOUD_UNREACHABLE:
         return StatusView(phase, "Cloud unreachable", "ERROR",
                           blocker=Blocker(BlockerKind.RECONNECT, "Cloud unreachable"),

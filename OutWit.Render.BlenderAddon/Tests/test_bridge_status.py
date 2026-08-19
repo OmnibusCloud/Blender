@@ -168,6 +168,35 @@ class ComputeStatusTests(unittest.TestCase):
         view = status.compute_status(make_scene(), make_state(is_connected_to_cloud=False))
         self.assertEqual(view.phase, status.Phase.CLOUD_UNREACHABLE)
 
+    def test_embedded_startup_pending_is_one_calm_connecting_phase(self):
+        # While the silent restore/connect runs, neither the Login CTA nor the red
+        # "Cloud unreachable" may flash — the whole window is one CONNECTING frame.
+        for overrides in (
+            dict(is_signed_in=False, is_connected_to_cloud=False),   # restore in flight
+            dict(is_signed_in=True, is_connected_to_cloud=False),    # connect in flight
+        ):
+            view = status.compute_status(make_scene(), make_state(embedded_session_pending=True, **overrides))
+            self.assertEqual(view.phase, status.Phase.CONNECTING)
+            self.assertEqual(view.status_line, "Connecting to OmnibusCloud…")
+            self.assertIsNone(view.blocker)
+
+    def test_embedded_startup_pending_does_not_mask_a_ready_session(self):
+        view = status.compute_status(make_scene(), make_state(embedded_session_pending=True))
+        self.assertEqual(view.phase, status.Phase.READY)
+
+    def test_finished_startup_shows_the_real_phases_again(self):
+        view = status.compute_status(make_scene(), make_state(
+            embedded_session_pending=False, is_signed_in=False, is_connected_to_cloud=False))
+        self.assertEqual(view.phase, status.Phase.SIGNED_OUT)
+        view = status.compute_status(make_scene(), make_state(
+            embedded_session_pending=False, is_connected_to_cloud=False))
+        self.assertEqual(view.phase, status.Phase.CLOUD_UNREACHABLE)
+
+    def test_disconnected_status_line_is_transport_neutral(self):
+        view = status.compute_status(make_scene(), make_state(bridge_is_running=False))
+        self.assertEqual(view.phase, status.Phase.DISCONNECTED)
+        self.assertEqual(view.status_line, "Connecting to OmnibusCloud…")
+
     def test_signed_out_takes_precedence_over_cloud_offline(self):
         # A freshly started bridge reports cloud offline until signed in; the artist must still reach the
         # Login CTA. Regression: gating cloud-before-auth dead-ended at 'Cloud unreachable / Reconnect'.

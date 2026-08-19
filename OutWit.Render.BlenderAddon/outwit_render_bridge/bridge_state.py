@@ -255,6 +255,11 @@ def _output_format_set(self, value: int) -> None:
 class OutWitBridgeRuntimeState(PropertyGroup):
     bridge_version: StringProperty(name="Bridge Version", default="")
     bridge_url: StringProperty(name="Bridge Url", default="")
+    embedded_session_pending: BoolProperty(
+        name="Embedded Session Pending",
+        description="A silent session restore / connect is in flight (embedded client startup)",
+        default=False,
+    )
     context_path: StringProperty(name="Context Path", default="")
     bridge_process_id: IntProperty(name="Bridge Process Id", default=0)
     bridge_is_running: BoolProperty(name="Bridge Is Running", default=False)
