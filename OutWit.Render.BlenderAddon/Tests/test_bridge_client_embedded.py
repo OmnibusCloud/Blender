@@ -108,12 +108,18 @@ class FakePyocClient:
     def credentials_attach(self, path, max_age_days=0):
         self.attached_store = path
 
+    restore_succeeds = False
+
     def credentials_restore(self):
         self.calls.append(("credentials_restore",))
         self.next_operation += 1
         operation = self.next_operation
-        self.queue.append(FakeEvent(pyoc.events.OPERATION_FAILED, operation, {"status": pyoc.OC_NOT_FOUND, "message": "no persisted session"},
-                                    status=pyoc.OC_NOT_FOUND, message="no persisted session"))
+        if self.restore_succeeds:
+            self.queue.append(FakeEvent(pyoc.events.OPERATION_COMPLETED, operation,
+                                        {"credentials": {"schemaVersion": 1, "restored": True}}))
+        else:
+            self.queue.append(FakeEvent(pyoc.events.OPERATION_FAILED, operation, {"status": pyoc.OC_NOT_FOUND, "message": "no persisted session"},
+                                        status=pyoc.OC_NOT_FOUND, message="no persisted session"))
         return operation
 
     def login_browser(self):
@@ -253,6 +259,47 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(fake.attached_store.endswith("session.bin"))
         client.begin_sign_in()
         self.assertEqual([c[0] for c in fake.calls][:2], ["credentials_restore", "login_browser"])
+
+    def test_heartbeat_auto_restore_signs_in_without_the_browser(self):
+        client, fake = _client(session_store_path=os.path.join(tempfile.gettempdir(), "oc-embedded", "session.bin"))
+        fake.restore_succeeds = True
+
+        client.try_restore_session()  # what the heartbeat calls
+        state = client.get_session_state()  # folds the restore completion
+        self.assertTrue(state.is_signed_in)
+        self.assertIn(("connect",), fake.calls)
+        self.assertNotIn("login_browser", [c[0] for c in fake.calls])
+
+        started = client.begin_sign_in()
+        self.assertFalse(started.requires_browser)
+        self.assertEqual(started.message, "Already signed in.")
+
+    def test_auto_restore_runs_once_and_stays_quiet_on_a_fresh_machine(self):
+        client, fake = _client(session_store_path=os.path.join(tempfile.gettempdir(), "oc-embedded", "session.bin"))
+        client.try_restore_session()
+        state = client.get_session_state()
+        self.assertFalse(state.is_signed_in)
+        self.assertIsNone(state.last_error, "a missing persisted session is the normal fresh state, not an error")
+        self.assertTrue(state.needs_interactive_login)
+        client.try_restore_session()
+        self.assertEqual([c[0] for c in fake.calls].count("credentials_restore"), 1, "one attempt per process")
+
+    def test_sign_in_during_pending_restore_finishes_it_instead_of_the_browser(self):
+        client, fake = _client(session_store_path=os.path.join(tempfile.gettempdir(), "oc-embedded", "session.bin"))
+        fake.restore_succeeds = True
+        client.try_restore_session()
+        # The user clicks Sign In before the heartbeat folded the outcome:
+        started = client.begin_sign_in()
+        # Either the pump already folded the completion ("Already signed in.") or the
+        # pending-restore branch finished it ("Session restored.") — never the browser.
+        self.assertFalse(started.requires_browser)
+        self.assertTrue(client.get_session_state().is_signed_in)
+        self.assertNotIn("login_browser", [c[0] for c in fake.calls])
+
+    def test_no_store_means_no_restore_attempt(self):
+        client, fake = _client()
+        client.try_restore_session()
+        self.assertNotIn("credentials_restore", [c[0] for c in fake.calls])
 
     def test_sign_out_closes_and_logs_out(self):
         client, fake = _signed_in_client()

@@ -647,12 +647,14 @@ def _diagnostics(state) -> dict:
 
 
 def _connection_status_view(state, phase: Phase) -> StatusView:
+    embedded = (getattr(state, "bridge_url", "") or "") == "embedded"
     if phase == Phase.BRIDGE_MISSING:
         return StatusView(phase, "Bridge not found", "ERROR",
                           blocker=Blocker(BlockerKind.LOCATE_BRIDGE, "Bridge not found"),
                           diagnostics=_diagnostics(state))
     if phase == Phase.DISCONNECTED:
-        return StatusView(phase, "Connecting to bridge…", "SORTTIME", diagnostics=_diagnostics(state))
+        return StatusView(phase, "Connecting to OmnibusCloud…" if embedded else "Connecting to bridge…",
+                          "SORTTIME", diagnostics=_diagnostics(state))
     if phase == Phase.CLOUD_UNREACHABLE:
         return StatusView(phase, "Cloud unreachable", "ERROR",
                           blocker=Blocker(BlockerKind.RECONNECT, "Cloud unreachable"),

@@ -178,6 +178,7 @@ class EmbeddedBridgeClient:
         self._connecting = False
         self._last_error: str | None = None
         self._pending_login: int | None = None
+        self._pending_restore: int | None = None
         self._pending_connect: int | None = None
         self._transfers: dict[int, _Transfer] = {}
         self._downloads: dict[str, _ResultDownload] = {}
@@ -207,6 +208,23 @@ class EmbeddedBridgeClient:
                 last_error=self._last_error,
             )
 
+    def try_restore_session(self) -> None:
+        """Starts the persisted-session restore in the background, once per process — the
+        heartbeat calls this so a remembered user is signed in without touching the panel,
+        the way the bridge process restored its own session at start. Quiet on failure:
+        a fresh machine simply stays signed out and the Sign In button does the browser flow."""
+        with self._lock:
+            self._pump()
+            if self._signed_in or self._pending_login is not None or self._pending_restore is not None:
+                return
+            if not self._session_store_path or not self._remember_sign_in or self._session_restored_tried:
+                return
+            self._session_restored_tried = True
+            try:
+                self._pending_restore = self._client.credentials_restore()
+            except pyoc.OcError:
+                pass
+
     def begin_sign_in(self) -> BeginSignInResponse:
         with self._lock:
             self._pump()
@@ -218,7 +236,15 @@ class EmbeddedBridgeClient:
                 if self._session_store_path and self._remember_sign_in and not self._session_restored_tried:
                     self._session_restored_tried = True
                     try:
-                        self._client.wait(self._client.credentials_restore(), timeout=60)
+                        self._pending_restore = self._client.credentials_restore()
+                    except pyoc.OcError:
+                        pass
+                if self._pending_restore is not None:
+                    # An auto-restore is in flight (or just started): finish it instead of
+                    # opening the browser over a session that is about to come back.
+                    operation, self._pending_restore = self._pending_restore, None
+                    try:
+                        self._client.wait(operation, timeout=60, on_event=self._fold)
                         self._signed_in = True
                         self._start_connect()
                         return BeginSignInResponse(started=True, requires_browser=False, message="Session restored.")
@@ -243,6 +269,7 @@ class EmbeddedBridgeClient:
             self._connected = False
             self._connecting = False
             self._pending_login = None
+            self._pending_restore = None
             self._pending_connect = None
             return True
 
@@ -254,7 +281,7 @@ class EmbeddedBridgeClient:
                 display_name=None,
                 user_id=None,
                 can_launch=self._signed_in and self._connected,
-                needs_interactive_login=not self._signed_in and self._pending_login is None,
+                needs_interactive_login=not self._signed_in and self._pending_login is None and self._pending_restore is None,
                 last_error=self._last_error,
             )
 
@@ -569,6 +596,15 @@ class EmbeddedBridgeClient:
             self._last_error = "Sign-in expired; sign in again."
             return
         if event.operation is None:
+            return
+        if event.operation == self._pending_restore and event.is_terminal:
+            self._pending_restore = None
+            if event.is_completed:
+                self._signed_in = True
+                self._last_error = None
+                self._start_connect()
+            # Failure stays quiet: NOT_FOUND/expired is the normal fresh state, and the
+            # Sign In button is the recovery for everything else.
             return
         if event.operation == self._pending_login and event.is_terminal:
             self._pending_login = None

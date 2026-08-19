@@ -1350,6 +1350,7 @@ def _pump_embedded_session(context) -> None:
     state = _get_runtime_state(context)
     try:
         client = get_embedded_client(context)
+        client.try_restore_session()
         session = client.get_session_state()
         status = client.get_bridge_status()
     except Exception as ex:  # noqa: BLE001 - surfaced in state; retried by the heartbeat
