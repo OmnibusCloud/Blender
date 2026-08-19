@@ -90,13 +90,16 @@ def stage_native_library(source: Path, staging_root: Path | None = None) -> Path
 
 
 def resolve_library_path(context) -> str:
-    """Explicit preference → bundled library (staged) → pyoc's own lookup ($OMNIBUSCLOUD_NATIVE)."""
-    configured = str(getattr(_preferences(context), "native_library_path", "") or "").strip()
-    if configured:
-        configured = bpy.path.abspath(configured)
-        if os.path.isfile(configured):
-            return configured
-        raise FileNotFoundError(f"Native library not found at the configured path: {configured}")
+    """$OMNIBUSCLOUD_NATIVE (developer override) → bundled library (staged) → pyoc's rid folders.
+
+    No preference: artists never pick a native library (the package carries the right one for
+    their platform, byte-verified against the released carrier), and a mismatched hand-picked
+    binary is an ABI break at best. Developers point $OMNIBUSCLOUD_NATIVE at a local build."""
+    override = (os.environ.get("OMNIBUSCLOUD_NATIVE") or "").strip()
+    if override:
+        if os.path.isfile(override):
+            return override
+        raise FileNotFoundError(f"$OMNIBUSCLOUD_NATIVE points at a missing file: {override}")
 
     bundled = bundled_library_path()
     if bundled is not None:
@@ -108,7 +111,7 @@ def resolve_library_path(context) -> str:
 
     raise FileNotFoundError(
         "No OmnibusCloud native library: this package carries none for "
-        f"{pyoc.runtime_identifier()} — set the library path in the addon preferences.")
+        f"{pyoc.runtime_identifier()} — reinstall the addon package for your platform.")
 
 
 def get_embedded_client(context) -> EmbeddedBridgeClient:

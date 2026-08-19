@@ -16,6 +16,16 @@ def _on_remember_render_settings_changed(self, context) -> None:
         pass
 
 
+def _default_download_directory() -> str:
+    """The folder used while Download Directory is empty (shown as the greyed hint)."""
+    try:
+        from .bridge_embedded import user_data_root
+
+        return str(user_data_root() / "Renders")
+    except Exception:
+        return ""
+
+
 def _package_is_embedded_only() -> bool:
     """A package that ships the native library and no bridge runs embedded by default: there is
     nothing else it could run. Bridge-carrying packages keep the bridge as the default."""
@@ -85,14 +95,6 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
         default="https://auth.omnibuscloud.com",
     )
 
-    native_library_path: StringProperty(
-        name="Native Library Path",
-        description="Optional explicit path to omnibuscloud_native (.dll/.so/.dylib); empty = the library "
-                    "bundled with this package for your platform",
-        subtype="FILE_PATH",
-        default="",
-    )
-
     download_directory: StringProperty(
         name="Download Directory",
         description="Where finished renders are downloaded (embedded client); empty = the per-user "
@@ -139,14 +141,20 @@ class OutWitBridgeAddonPreferences(AddonPreferences):
     def draw(self, context):
         layout = self.layout
         layout.label(text="Connection")
-        layout.prop(self, "use_embedded_client")
-        if self.use_embedded_client:
+        if not _package_is_embedded_only():
+            # The transport toggle only exists while a package still carries the bridge;
+            # a bridge-less package has nothing else it could run.
+            layout.prop(self, "use_embedded_client")
+        if self.use_embedded_client or _package_is_embedded_only():
             layout.prop(self, "server_url")
             layout.prop(self, "identity_url")
-            layout.prop(self, "native_library_path")
             layout.prop(self, "download_directory")
+            if not (self.download_directory or "").strip():
+                hint = layout.row()
+                hint.enabled = False
+                hint.label(text=f"Using: {_default_download_directory()}", icon="FILE_FOLDER")
             layout.prop(self, "remember_sign_in")
-            layout.label(text="Embedded: no bridge process. URL and library changes apply after restarting Blender.")
+            layout.label(text="URL changes apply after restarting Blender.")
         else:
             layout.label(text="Local Bridge Discovery")
             layout.prop(self, "bridge_context_directory")
